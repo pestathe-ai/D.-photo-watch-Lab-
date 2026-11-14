@@ -50,10 +50,14 @@ class EnhanceParams {
   final double detail; // 0..1 chiarezza locale
   final double glare; // 0..1 riduce il velo di riflesso sul vetro
   final double dust; // 0..1 toglie puntini di polvere
+  final double smooth; // 0..1 ammorbidisce micro-segni e graffietti
 
   // Sfondo e ritaglio
   final double background; // 0..1 porta lo sfondo chiaro verso il bianco
   final bool square; // ritaglio 1:1 centrato sul quadrante
+
+  /// 0..1: quanto applicare gli effetti (il colore automatico resta pieno).
+  final double intensity;
 
   const EnhanceParams({
     this.autoColor = true,
@@ -69,27 +73,33 @@ class EnhanceParams {
     this.detail = 0,
     this.glare = 0,
     this.dust = 0,
+    this.smooth = 0,
     this.background = 0,
     this.square = false,
+    this.intensity = 1,
   });
 
   /// Nessuna modifica (solo eventuale colore automatico spento).
   static const none = EnhanceParams(autoColor: false);
 
-  /// Il "Migliora in un tocco": valori provati sul prototipo.
+  /// Il "Migliora in un tocco" naturale: corregge luce e colore con
+  /// delicatezza, ammorbidisce i segni invece di evidenziarli, nitidezza
+  /// leggera. Niente "dettaglio" forzato.
   static const auto = EnhanceParams(
     autoColor: true,
-    warmth: 0.2,
-    contrast: 0.15,
-    shadows: 0.2,
-    highlights: 0.3,
-    denoise: 0.5,
-    sharpen: 0.5,
+    warmth: 0.1,
+    contrast: 0.05,
+    shadows: 0.15,
+    highlights: 0.25,
+    denoise: 0.4,
+    sharpen: 0.2,
     dialOn: true,
-    detail: 0.5,
-    glare: 0.6,
-    dust: 0.6,
-    background: 0.6,
+    detail: 0,
+    glare: 0.35,
+    dust: 0.5,
+    smooth: 0.5,
+    background: 0.5,
+    intensity: 0.8,
   );
 
   EnhanceParams copyWith({
@@ -106,8 +116,10 @@ class EnhanceParams {
     double? detail,
     double? glare,
     double? dust,
+    double? smooth,
     double? background,
     bool? square,
+    double? intensity,
   }) =>
       EnhanceParams(
         autoColor: autoColor ?? this.autoColor,
@@ -123,9 +135,32 @@ class EnhanceParams {
         detail: detail ?? this.detail,
         glare: glare ?? this.glare,
         dust: dust ?? this.dust,
+        smooth: smooth ?? this.smooth,
         background: background ?? this.background,
         square: square ?? this.square,
+        intensity: intensity ?? this.intensity,
       );
+
+  /// Regolazioni effettive: tutti gli effetti moltiplicati per l'intensità
+  /// (colore automatico, calore, quadrante e ritaglio restano come sono).
+  EnhanceParams effective() {
+    final k = intensity.clamp(0.0, 1.0).toDouble();
+    if (k == 1) return this;
+    return copyWith(
+      exposure: exposure * k,
+      contrast: contrast * k,
+      shadows: shadows * k,
+      highlights: highlights * k,
+      denoise: denoise * k,
+      sharpen: sharpen * k,
+      detail: detail * k,
+      glare: glare * k,
+      dust: dust * k,
+      smooth: smooth * k,
+      background: background * k,
+      intensity: 1,
+    );
+  }
 
   /// Tiene il quadrante già posizionato quando si applica un preset.
   EnhanceParams withDial(Dial d) => copyWith(dial: d);

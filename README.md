@@ -3,6 +3,18 @@
 App Android che migliora le foto degli orologi da mettere in vendita.
 Tutto avviene **sul telefono**: nessun caricamento, nessuna chiave, funziona anche offline.
 
+## Novità v0.3
+- **Ritocco naturale**: "Migliora in un tocco" ora corregge luce e colore con delicatezza
+  e **ammorbidisce** graffietti e micro-segni sul quadrante invece di evidenziarli
+  (indici, lancette e scritte restano nitidi). Nitidezza leggera solo sui bordi veri.
+- **Intensità**: un cursore per decidere quanto ritoccare.
+- **Scontorno IA di Google** (ML Kit, sul telefono): riconosce l'orologio e schiarisce solo
+  lo sfondo, anche se non è bianco, tenendo un filo d'ombra naturale. Il modello arriva da
+  Google Play (la prima volta serve internet), poi funziona offline. Se non è disponibile,
+  l'app usa il metodo semplice di prima.
+- "Dettaglio" del quadrante ora parte da zero: rende più incisi indici e scritte ma mostra i difetti.
+- App e icona **rosse**.
+
 ## Novità v0.2
 - **Più foto insieme**: selezioni fino a 30 foto, le migliora tutte in automatico e le salva
   o condivide in un colpo. Tocchi una foto per ritoccarla a mano, poi "Applica a tutte"

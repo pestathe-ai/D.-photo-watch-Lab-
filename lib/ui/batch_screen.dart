@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../core/codec.dart';
 import '../core/params.dart';
+import '../services/cutout.dart';
 import 'editor_screen.dart';
 
 class _Item {
@@ -16,6 +17,7 @@ class _Item {
   Analysis? analysis;
   EnhanceParams? params;
   Uint8List? thumb;
+  SubjectMask? subject;
   bool dialFound = false;
   bool failed = false;
   bool busy = false;
@@ -36,6 +38,7 @@ class BatchScreen extends StatefulWidget {
 class _BatchScreenState extends State<BatchScreen> {
   late final List<_Item> _items = widget.files.map(_Item.new).toList();
   int _prepared = 0;
+  int _cutoutOk = 0;
   String? _exportMsg;
   double _exportProgress = 0;
 
@@ -58,8 +61,14 @@ class _BatchScreenState extends State<BatchScreen> {
         } else {
           it.analysis = r.analysis;
           it.params = r.params;
-          it.thumb = r.thumbJpeg;
           it.dialFound = r.dialGuess.found;
+          it.subject = await Cutout.maskFor(r.previewJpeg, r.previewW, r.previewH);
+          if (it.subject != null) _cutoutOk++;
+          it.thumb = await compute(
+              runFileRenderJob,
+              FileRenderJob(bytes, kPreviewMaxSide, r.analysis,
+                  r.params.copyWith(square: false),
+                  subject: it.subject, quality: 85));
         }
       } catch (_) {
         it.failed = true;
@@ -78,6 +87,7 @@ class _BatchScreenState extends State<BatchScreen> {
     LoadedPhoto? photo;
     try {
       photo = await compute(loadPhoto, await it.file.readAsBytes());
+      photo?.subject = it.subject;
     } catch (_) {}
     if (!mounted) return;
     setState(() => it.busy = false);
@@ -95,6 +105,7 @@ class _BatchScreenState extends State<BatchScreen> {
     );
     if (result == null || !mounted) return;
     it.params = result;
+    it.subject = photo!.subject ?? it.subject;
     it.dialFound = it.dialFound || result.dialOn;
     await _rethumb(it, photo);
     if (!mounted || _items.length < 2) return;
@@ -107,14 +118,18 @@ class _BatchScreenState extends State<BatchScreen> {
   Future<void> _rethumb(_Item it, [LoadedPhoto? photo]) async {
     setState(() => it.busy = true);
     try {
-      final job = photo != null
-          ? RenderJob(photo.preview, it.analysis!, it.params!.copyWith(square: false), 85)
-          : null;
-      if (job != null) {
-        it.thumb = await compute(runRenderJob, job);
+      if (photo != null) {
+        it.thumb = await compute(
+            runRenderJob,
+            RenderJob(photo.preview, it.analysis!,
+                it.params!.copyWith(square: false), 85,
+                subject: it.subject));
       } else {
-        final r = await compute(_rerenderThumb,
-            _ThumbJob(await it.file.readAsBytes(), it.analysis!, it.params!));
+        final r = await compute(
+            runFileRenderJob,
+            FileRenderJob(await it.file.readAsBytes(), kPreviewMaxSide,
+                it.analysis!, it.params!.copyWith(square: false),
+                subject: it.subject, quality: 85));
         if (r != null) it.thumb = r;
       }
     } catch (_) {}
@@ -152,7 +167,10 @@ class _BatchScreenState extends State<BatchScreen> {
       });
       final it = todo[k];
       final bytes = await compute(
-          runExportJob, ExportJob(await it.file.readAsBytes(), it.analysis!, it.params!));
+          runFileRenderJob,
+          FileRenderJob(await it.file.readAsBytes(), kExportMaxSide,
+              it.analysis!, it.params!,
+              subject: it.subject));
       if (bytes == null) continue;
       final f = File('${dir.path}/dphotowatch_${stamp}_${k + 1}.jpg');
       await f.writeAsBytes(bytes, flush: true);
@@ -216,10 +234,8 @@ class _BatchScreenState extends State<BatchScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
                 child: Text(
-                  found == _items.length
-                      ? 'Quadrante trovato in tutte le foto. Tocca una foto per ritoccarla.'
-                      : 'Quadrante trovato in $found foto su ${_items.length}. '
-                          'Tocca quelle con il segnale arancio per posizionarlo tu.',
+                  '${found == _items.length ? 'Quadrante trovato in tutte le foto. Tocca una foto per ritoccarla.' : 'Quadrante trovato in $found foto su ${_items.length}: tocca quelle con il segnale arancio per posizionarlo tu.'}'
+                  '${_cutoutOk == _items.length ? '' : '\nScontorno IA riuscito in $_cutoutOk su ${_items.length}${Cutout.lastError != null ? ' (${Cutout.lastError})' : ''}.'}',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -309,18 +325,4 @@ class _BatchScreenState extends State<BatchScreen> {
       ),
     );
   }
-}
-
-class _ThumbJob {
-  final Uint8List bytes;
-  final Analysis analysis;
-  final EnhanceParams params;
-  _ThumbJob(this.bytes, this.analysis, this.params);
-}
-
-Uint8List? _rerenderThumb(_ThumbJob j) {
-  final preview = decodeToRgb(j.bytes, kPreviewMaxSide);
-  if (preview == null) return null;
-  return renderJpeg(preview, j.analysis, j.params.copyWith(square: false),
-      quality: 85);
 }

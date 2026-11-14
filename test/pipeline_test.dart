@@ -214,6 +214,69 @@ void main() {
     expect(out.r[i], greaterThan(out.b[i] + 0.02));
   });
 
+  test('ammorbidisce un graffietto ma lascia nitido l\'indice', () {
+    // quadrante uniforme con un graffio sottile e poco contrastato
+    final img = synthetic(dust: false);
+    for (var x = 330; x < 380; x++) {
+      final i = (330 * W + x) * 3;
+      img.rgb[i] += 18;
+      img.rgb[i + 1] += 18;
+      img.rgb[i + 2] += 18;
+    }
+    const base = EnhanceParams(
+        autoColor: false, dialOn: true, dial: dial);
+    final soft = enhance(img, Analysis.neutral, base.copyWith(smooth: 1));
+    final plain = enhance(img, Analysis.neutral, base);
+    // contrasto medio del graffio lungo la sua lunghezza
+    double scratch(Planes p) {
+      double s = 0;
+      for (var x = 340; x < 370; x++) {
+        s += lumAt(p, x, 330) - (lumAt(p, x, 324) + lumAt(p, x, 336)) / 2;
+      }
+      return s / 30;
+    }
+    expect(scratch(soft), lessThan(scratch(plain) * 0.6));
+    // l'indice delle 12 resta chiaro e netto
+    expect(lumAt(soft, 400, 160), greaterThan(0.75));
+    expect(lumAt(soft, 400, 160) - lumAt(soft, 410, 160), greaterThan(0.5));
+  });
+
+  test('con lo scontorno IA lo sfondo schiarisce, l\'orologio no', () {
+    final src = synthetic(dust: false);
+    // maschera: orologio = cerchio della cassa
+    final m = Uint8List(W * H);
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        final d = math.sqrt((x - 400) * (x - 400) + (y - 300) * (y - 300));
+        m[y * W + x] = d < 215 ? 255 : 0;
+      }
+    }
+    // sfondo scuro e colorato: senza IA non verrebbe toccato
+    for (var i = 0; i < W * H; i++) {
+      if (m[i] == 0) {
+        src.rgb[i * 3] = 90;
+        src.rgb[i * 3 + 1] = 120;
+        src.rgb[i * 3 + 2] = 80;
+      }
+    }
+    final p = EnhanceParams.none.copyWith(background: 1, dialOn: false);
+    final withAi = enhance(src, Analysis.neutral, p, subject: m);
+    final noAi = enhance(src, Analysis.neutral, p);
+    expect(lumAt(withAi, 20, 20), greaterThan(0.75));
+    expect(lumAt(noAi, 20, 20), lessThan(0.5));
+    // la cassa (dentro la maschera) resta com'era
+    expect(lumAt(withAi, 205, 300), closeTo(lumAt(noAi, 205, 300), 0.01));
+  });
+
+  test('intensità zero = solo colore automatico', () {
+    final p = EnhanceParams.auto.withDial(dial).copyWith(intensity: 0).effective();
+    expect(p.sharpen, 0);
+    expect(p.smooth, 0);
+    expect(p.background, 0);
+    expect(p.autoColor, isTrue);
+    expect(p.dialOn, isTrue);
+  });
+
   test('ritaglio quadrato centrato sul quadrante', () {
     final out = enhance(synthetic(dust: false), Analysis.neutral,
         EnhanceParams.none.copyWith(square: true, dialOn: true, dial: dial));
@@ -238,8 +301,9 @@ void main() {
     final prep = prepareBatchItem(jpg)!;
     expect(prep.dialGuess.found, isTrue);
     expect(prep.params.dialOn, isTrue);
-    expect(prep.thumbJpeg.length, greaterThan(1000));
-    final out = runExportJob(ExportJob(jpg, prep.analysis, prep.params))!;
+    expect(prep.previewW, W);
+    final out = runFileRenderJob(
+        FileRenderJob(jpg, kExportMaxSide, prep.analysis, prep.params))!;
     final back = decodeToRgb(out, 4000)!;
     expect(back.width, W);
   });

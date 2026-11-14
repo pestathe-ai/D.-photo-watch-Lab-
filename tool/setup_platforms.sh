@@ -13,6 +13,10 @@ sed -i 's#android:label="[^"]*"#android:label="D. Photo Watch Lab"#' "$MANIFEST"
 if ! grep -q 'WRITE_EXTERNAL_STORAGE' "$MANIFEST"; then
   sed -i 's#<application#<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n    <application android:requestLegacyExternalStorage="true"#' "$MANIFEST"
 fi
+# Scontorno IA (ML Kit): scarica il modello già all'installazione.
+if ! grep -q 'mlkit.vision.DEPENDENCIES' "$MANIFEST"; then
+  sed -i 's#</application>#    <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="subject_segment"/>\n    </application>#' "$MANIFEST"
+fi
 # Foto grandi: più memoria per l'app.
 sed -i 's#<application #<application android:largeHeap="true" #' "$MANIFEST"
 

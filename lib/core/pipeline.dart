@@ -360,8 +360,16 @@ int removeDust(Planes p, Float32List mask, double strength, double scale) {
 /// Applica tutto il ritocco. Le dimensioni dei filtri sono pensate per una
 /// foto con lato lungo di 2048 px e scalate sulla misura reale, così
 /// l'anteprima piccola somiglia al risultato salvato.
-Planes enhance(RgbImage src, Analysis an, EnhanceParams p) {
+///
+/// [subject] è la maschera dell'orologio (0 sfondo .. 255 orologio) alla
+/// stessa misura di [src], data dallo scontorno IA; se manca, lo sfondo
+/// viene riconosciuto solo dal colore (chiaro e poco saturo).
+Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
+    {Uint8List? subject}) {
+  final p = params.effective();
   final img = Planes.fromRgb(src);
+  final subj =
+      subject != null && subject.length == src.width * src.height ? subject : null;
   final w = img.w, h = img.h, n = w * h;
   final scale = math.max(w, h) / 2048.0;
   int s(double x) => math.max(1, (x * scale).round());
@@ -447,14 +455,35 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams p) {
     removeDust(img, mask, p.dust, scale);
   }
 
+  // 5b. ammorbidisce micro-segni e graffietti: filtro guidato sulla
+  // luminosità. I bordi netti (indici, lancette, scritte) restano, le
+  // piccole variazioni a basso contrasto vengono lisciate. Pieno sul
+  // quadrante, a metà sul resto dell'orologio se c'è lo scontorno.
+  if (p.smooth > 0 && (p.dialOn || subj != null)) {
+    final l = img.luminance();
+    final eps = math.pow(0.035 + 0.05 * p.smooth, 2).toDouble();
+    final base = guidedSelf(l, w, h, s(4), eps);
+    for (var i = 0; i < n; i++) {
+      var region = mask[i];
+      if (subj != null) region = math.max(region, 0.5 * subj[i] / 255.0);
+      final k = p.smooth * region;
+      if (k <= 0) continue;
+      final d = (base[i] - l[i]) * k;
+      img.r[i] += d;
+      img.g[i] += d;
+      img.b[i] += d;
+    }
+  }
+
   // 6. nitidezza (sulla luminosità, con soglia per non alzare il rumore)
   if (p.sharpen > 0 || (p.dialOn && p.detail > 0)) {
     final l = img.luminance();
     final bl = gaussBlur(l, w, h, s(1.5));
     for (var i = 0; i < n; i++) {
-      final amt = p.sharpen * 1.5 + p.detail * mask[i] * 0.8;
+      final amt = p.sharpen * 1.0 + p.detail * mask[i] * 0.8;
       var hp = l[i] - bl[i];
-      final mag = hp.abs() - 0.02;
+      // soglia alta: rinforza solo i bordi veri, non la grana né i segni
+      final mag = hp.abs() - 0.035;
       if (mag <= 0) continue;
       hp = hp.sign * mag * amt;
       img.r[i] += hp;
@@ -463,20 +492,26 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams p) {
     }
   }
 
-  // 7. sfondo chiaro e poco colorato -> bianco (mai dentro il quadrante)
+  // 7. sfondo verso il bianco (mai dentro il quadrante)
   if (p.background > 0) {
-    final thr = 0.82 - 0.25 * p.background;
     final k = math.sqrt(p.background);
+    final thr = 0.82 - 0.25 * p.background;
     for (var i = 0; i < n; i++) {
       final r = img.r[i].clamp(0.0, 1.0).toDouble();
       final g = img.g[i].clamp(0.0, 1.0).toDouble();
       final b = img.b[i].clamp(0.0, 1.0).toDouble();
       final l = 0.299 * r + 0.587 * g + 0.114 * b;
-      final sat = math.max(r, math.max(g, b)) - math.min(r, math.min(g, b));
-      final t = ((l - thr) / 0.12).clamp(0.0, 1.0) *
-          (1 - sat / 0.18).clamp(0.0, 1.0) *
-          (1 - mask[i]);
-      final m = k * t;
+      double t;
+      if (subj != null) {
+        // con lo scontorno: tutto lo sfondo, ma le ombre scure restano un
+        // po' (l'orologio non sembra "appeso nel vuoto")
+        final bg = 1 - subj[i] / 255.0;
+        t = bg * (0.55 + 0.45 * l);
+      } else {
+        final sat = math.max(r, math.max(g, b)) - math.min(r, math.min(g, b));
+        t = ((l - thr) / 0.12).clamp(0.0, 1.0) * (1 - sat / 0.18).clamp(0.0, 1.0);
+      }
+      final m = k * t * (1 - mask[i]);
       img.r[i] = r + m * (1 - r);
       img.g[i] = g + m * (1 - g);
       img.b[i] = b + m * (1 - b);
@@ -502,4 +537,39 @@ Planes cropSquare(Planes p, Dial d) {
     b.setRange(dst, dst + side, p.b, src);
   }
   return Planes(side, side, r, g, b);
+}
+
+/// Ingrandisce/rimpicciolisce una maschera 8 bit (bilineare).
+Uint8List resizeMask(Uint8List m, int sw, int sh, int dw, int dh) {
+  if (sw == dw && sh == dh) return m;
+  final out = Uint8List(dw * dh);
+  for (var y = 0; y < dh; y++) {
+    final fy = ((y + 0.5) * sh / dh - 0.5).clamp(0.0, sh - 1.0);
+    final y0 = fy.floor(), y1 = math.min(y0 + 1, sh - 1);
+    final ty = fy - y0;
+    for (var x = 0; x < dw; x++) {
+      final fx = ((x + 0.5) * sw / dw - 0.5).clamp(0.0, sw - 1.0);
+      final x0 = fx.floor(), x1 = math.min(x0 + 1, sw - 1);
+      final tx = fx - x0;
+      final a = m[y0 * sw + x0] * (1 - tx) + m[y0 * sw + x1] * tx;
+      final b = m[y1 * sw + x0] * (1 - tx) + m[y1 * sw + x1] * tx;
+      out[y * dw + x] = (a * (1 - ty) + b * ty).round();
+    }
+  }
+  return out;
+}
+
+/// Converte la maschera di fiducia (0..1) dello scontorno in 8 bit,
+/// ammorbidendo appena il bordo per non avere contorni seghettati.
+Uint8List confidenceToMask(List<double> conf, int w, int h) {
+  final f = Float32List(w * h);
+  for (var i = 0; i < f.length && i < conf.length; i++) {
+    f[i] = conf[i];
+  }
+  final soft = boxBlur(f, w, h, 1);
+  final out = Uint8List(w * h);
+  for (var i = 0; i < out.length; i++) {
+    out[i] = (soft[i].clamp(0.0, 1.0) * 255).round();
+  }
+  return out;
 }

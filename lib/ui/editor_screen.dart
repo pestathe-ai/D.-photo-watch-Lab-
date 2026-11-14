@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 import '../core/codec.dart';
 import '../core/params.dart';
 import '../core/pipeline.dart';
+import '../services/cutout.dart';
 
 /// Lavoro da mandare a un isolate: solo dati semplici.
 class RenderJob {
@@ -19,12 +20,13 @@ class RenderJob {
   final Analysis analysis;
   final EnhanceParams params;
   final int quality;
+  final SubjectMask? subject;
 
-  RenderJob(this.src, this.analysis, this.params, this.quality);
+  RenderJob(this.src, this.analysis, this.params, this.quality, {this.subject});
 }
 
-Uint8List runRenderJob(RenderJob j) =>
-    renderJpeg(j.src, j.analysis, j.params, quality: j.quality);
+Uint8List runRenderJob(RenderJob j) => renderJpeg(j.src, j.analysis, j.params,
+    subject: j.subject, quality: j.quality);
 
 enum _Tab { auto, light, dial, background }
 
@@ -73,6 +75,28 @@ class _EditorScreenState extends State<EditorScreen> {
       _p = _p.copyWith(dial: const Dial(r: 0.32));
     }
     _render();
+    _cutout();
+  }
+
+  /// Stato dello scontorno IA per l'interfaccia.
+  String _cutoutState = 'cerco l\'orologio…';
+
+  Future<void> _cutout() async {
+    final ph = widget.photo;
+    if (ph.subject != null) {
+      _cutoutState = 'attivo';
+      return;
+    }
+    final m = await Cutout.maskFor(
+        ph.previewJpeg, ph.preview.width, ph.preview.height);
+    if (!mounted) return;
+    setState(() {
+      ph.subject = m;
+      _cutoutState = m != null
+          ? 'attivo'
+          : 'non disponibile (${Cutout.lastError ?? 'motivo sconosciuto'}): uso il metodo semplice';
+    });
+    if (m != null) _render();
   }
 
   @override
@@ -97,7 +121,8 @@ class _EditorScreenState extends State<EditorScreen> {
     try {
       // l'anteprima non ritaglia: il quadrato si vede come cornice
       final job = RenderJob(widget.photo.preview, widget.photo.analysis,
-          _p.copyWith(square: false), 88);
+          _p.copyWith(square: false), 88,
+          subject: widget.photo.subject);
       final bytes = await compute(runRenderJob, job);
       if (!mounted) return;
       setState(() => _shown = bytes);
@@ -119,7 +144,8 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<File?> _exportFile() async {
     setState(() => _exporting = true);
     try {
-      final job = RenderJob(widget.photo.full, widget.photo.analysis, _p, 93);
+      final job = RenderJob(widget.photo.full, widget.photo.analysis, _p, 93,
+          subject: widget.photo.subject);
       final bytes = await compute(runRenderJob, job);
       final dir = await getTemporaryDirectory();
       final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -307,6 +333,9 @@ class _EditorScreenState extends State<EditorScreen> {
             label: const Text('Migliora in un tocco'),
           ),
           const SizedBox(height: 8),
+          _slider('Intensità', _p.intensity, 0, 1,
+              (v) => _p.copyWith(intensity: v)),
+          const SizedBox(height: 4),
           OutlinedButton.icon(
             onPressed: () =>
                 _update(EnhanceParams.none.withDial(_p.dial), now: true),
@@ -344,23 +373,36 @@ class _EditorScreenState extends State<EditorScreen> {
             value: _p.dialOn,
             onChanged: (v) => _update(_p.copyWith(dialOn: v), now: true),
           ),
-          _slider('Dettaglio', _p.detail, 0, 1, (v) => _p.copyWith(detail: v),
+          _slider('Ammorbidisci segni', _p.smooth, 0, 1,
+              (v) => _p.copyWith(smooth: v),
               enabled: _p.dialOn),
           _slider('Anti-riflesso vetro', _p.glare, 0, 1,
               (v) => _p.copyWith(glare: v),
               enabled: _p.dialOn),
           _slider('Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),
               enabled: _p.dialOn),
+          _slider('Dettaglio', _p.detail, 0, 1, (v) => _p.copyWith(detail: v),
+              enabled: _p.dialOn),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Dettaglio rende più incisi indici e scritte, ma mostra anche i '
+              'difetti: usalo poco.',
+            ),
+          ),
         ]);
       case _Tab.background:
         return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
           _slider('Sfondo bianco', _p.background, 0, 1,
               (v) => _p.copyWith(background: v)),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Funziona con uno sfondo chiaro (foglio bianco o grigio): lo porta '
-              'al bianco pulito senza toccare il quadrante.',
+              widget.photo.subject != null
+                  ? 'Scontorno IA attivo: schiarisce solo lo sfondo, lascia '
+                      'l\'orologio com\'è e tiene un filo d\'ombra naturale.'
+                  : 'Scontorno IA: $_cutoutState. Senza IA funziona solo su '
+                      'sfondi già chiari (foglio bianco o grigio).',
             ),
           ),
           SwitchListTile(

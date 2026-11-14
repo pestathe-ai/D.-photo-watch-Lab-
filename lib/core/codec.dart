@@ -70,15 +70,31 @@ Uint8List encodeJpeg(RgbImage im, {int quality = 92}) {
 
 /// Tutto quello che serve dopo aver scelto una foto: originale per
 /// l'esportazione, anteprima piccola e analisi automatica.
+/// Maschera dell'orologio data dallo scontorno IA (0 sfondo .. 255 orologio).
+class SubjectMask {
+  final int width;
+  final int height;
+  final Uint8List data;
+
+  SubjectMask(this.width, this.height, this.data);
+
+  /// La stessa maschera alla misura di un'altra versione della foto.
+  Uint8List forSize(int w, int h) => resizeMask(data, width, height, w, h);
+}
+
 class LoadedPhoto {
   final RgbImage full;
   final RgbImage preview;
   final Analysis analysis;
+
+  /// Anteprima già raddrizzata, senza EXIF: è anche quella passata allo
+  /// scontorno IA, così la maschera ha esattamente le sue misure.
   final Uint8List previewJpeg;
   final DialGuess dialGuess;
+  SubjectMask? subject;
 
   LoadedPhoto(this.full, this.preview, this.analysis, this.previewJpeg,
-      this.dialGuess);
+      this.dialGuess, {this.subject});
 }
 
 LoadedPhoto? loadPhoto(Uint8List bytes) {
@@ -96,15 +112,18 @@ EnhanceParams autoParamsFor(DialGuess g) => g.found
     ? EnhanceParams.auto.withDial(g.dial)
     : EnhanceParams.auto.copyWith(dialOn: false);
 
-/// Per la modalità a più foto: analisi, quadrante e anteprima già migliorata,
-/// senza tenere in memoria la foto grande.
+/// Per la modalità a più foto: analisi, quadrante e anteprima raddrizzata
+/// (per lo scontorno), senza tenere in memoria la foto grande.
 class BatchPrepared {
   final Analysis analysis;
   final DialGuess dialGuess;
   final EnhanceParams params;
-  final Uint8List thumbJpeg;
+  final Uint8List previewJpeg;
+  final int previewW;
+  final int previewH;
 
-  BatchPrepared(this.analysis, this.dialGuess, this.params, this.thumbJpeg);
+  BatchPrepared(this.analysis, this.dialGuess, this.params, this.previewJpeg,
+      this.previewW, this.previewH);
 }
 
 BatchPrepared? prepareBatchItem(Uint8List bytes) {
@@ -112,29 +131,34 @@ BatchPrepared? prepareBatchItem(Uint8List bytes) {
   if (preview == null) return null;
   final analysis = analyze(Planes.fromRgb(preview));
   final guess = findDial(preview);
-  final params = autoParamsFor(guess);
-  final thumb = renderJpeg(preview, analysis, params.copyWith(square: false),
-      quality: 85);
-  return BatchPrepared(analysis, guess, params, thumb);
+  return BatchPrepared(analysis, guess, autoParamsFor(guess),
+      encodeJpeg(preview, quality: 90), preview.width, preview.height);
 }
 
-/// Esporta una foto della serie alla misura piena.
-class ExportJob {
+/// Ritocca una foto partendo dal file originale, alla misura [maxSide]
+/// (anteprima della serie o salvataggio).
+class FileRenderJob {
   final Uint8List bytes;
+  final int maxSide;
   final Analysis analysis;
   final EnhanceParams params;
+  final SubjectMask? subject;
+  final int quality;
 
-  ExportJob(this.bytes, this.analysis, this.params);
+  FileRenderJob(this.bytes, this.maxSide, this.analysis, this.params,
+      {this.subject, this.quality = 93});
 }
 
-Uint8List? runExportJob(ExportJob j) {
-  final full = decodeToRgb(j.bytes, kExportMaxSide);
-  if (full == null) return null;
-  return renderJpeg(full, j.analysis, j.params, quality: 93);
+Uint8List? runFileRenderJob(FileRenderJob j) {
+  final im = decodeToRgb(j.bytes, j.maxSide);
+  if (im == null) return null;
+  return renderJpeg(im, j.analysis, j.params,
+      subject: j.subject, quality: j.quality);
 }
 
 /// Ritocca e codifica in JPG (usato sia per l'anteprima sia per il salvataggio).
 Uint8List renderJpeg(RgbImage src, Analysis an, EnhanceParams p,
-    {int quality = 92}) {
-  return encodeJpeg(enhance(src, an, p).toRgb(), quality: quality);
+    {SubjectMask? subject, int quality = 92}) {
+  final m = subject?.forSize(src.width, src.height);
+  return encodeJpeg(enhance(src, an, p, subject: m).toRgb(), quality: quality);
 }
