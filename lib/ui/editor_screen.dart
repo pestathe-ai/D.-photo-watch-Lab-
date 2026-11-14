@@ -1,0 +1,466 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
+import 'package:image_picker/image_picker.dart' show XFile;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
+
+import '../core/codec.dart';
+import '../core/params.dart';
+import '../core/pipeline.dart';
+
+/// Lavoro da mandare a un isolate: solo dati semplici.
+class RenderJob {
+  final RgbImage src;
+  final Analysis analysis;
+  final EnhanceParams params;
+  final int quality;
+
+  RenderJob(this.src, this.analysis, this.params, this.quality);
+}
+
+Uint8List runRenderJob(RenderJob j) =>
+    renderJpeg(j.src, j.analysis, j.params, quality: j.quality);
+
+enum _Tab { auto, light, dial, background }
+
+class EditorScreen extends StatefulWidget {
+  final LoadedPhoto photo;
+  const EditorScreen({super.key, required this.photo});
+
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  late EnhanceParams _p;
+  Uint8List? _shown;
+  bool _rendering = false;
+  bool _pending = false;
+  bool _showOriginal = false;
+  bool _exporting = false;
+  _Tab _tab = _Tab.auto;
+  Timer? _debounce;
+
+  // gesto sul cerchio del quadrante
+  Dial? _dialAtStart;
+  Offset _focalAtStart = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    // cerchio iniziale: centrato, circa due terzi del lato corto
+    _p = EnhanceParams.auto.withDial(const Dial(r: 0.32));
+    _render();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _update(EnhanceParams p, {bool now = false}) {
+    setState(() => _p = p);
+    _debounce?.cancel();
+    _debounce = Timer(Duration(milliseconds: now ? 0 : 140), _render);
+  }
+
+  Future<void> _render() async {
+    if (_rendering) {
+      _pending = true;
+      return;
+    }
+    _rendering = true;
+    if (mounted) setState(() {});
+    try {
+      // l'anteprima non ritaglia: il quadrato si vede come cornice
+      final job = RenderJob(widget.photo.preview, widget.photo.analysis,
+          _p.copyWith(square: false), 88);
+      final bytes = await compute(runRenderJob, job);
+      if (!mounted) return;
+      setState(() => _shown = bytes);
+    } catch (e) {
+      if (mounted) _snack('Errore nell\'anteprima: $e');
+    } finally {
+      _rendering = false;
+      if (mounted) setState(() {});
+      if (_pending) {
+        _pending = false;
+        _render();
+      }
+    }
+  }
+
+  void _snack(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<File?> _exportFile() async {
+    setState(() => _exporting = true);
+    try {
+      final job = RenderJob(widget.photo.full, widget.photo.analysis, _p, 93);
+      final bytes = await compute(runRenderJob, job);
+      final dir = await getTemporaryDirectory();
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final f = File('${dir.path}/dphotowatch_$stamp.jpg');
+      await f.writeAsBytes(bytes, flush: true);
+      return f;
+    } catch (e) {
+      if (mounted) _snack('Errore nel salvataggio: $e');
+      return null;
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final f = await _exportFile();
+    if (f == null) return;
+    try {
+      if (!await Gal.hasPermission(toAlbum: true)) {
+        await Gal.requestPermission(toAlbum: true);
+      }
+      await Gal.putImage(f.path, album: 'D. Photo Watch Lab');
+      if (mounted) _snack('Salvata in galleria (album "D. Photo Watch Lab")');
+    } catch (e) {
+      if (mounted) _snack('Non riesco a salvare in galleria: $e');
+    }
+  }
+
+  Future<void> _share() async {
+    final f = await _exportFile();
+    if (f == null) return;
+    await SharePlus.instance.share(ShareParams(files: [XFile(f.path)]));
+  }
+
+  // ---------------------------------------------------------------- UI
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Ritocco'),
+        actions: [
+          IconButton(
+            tooltip: 'Condividi',
+            onPressed: _exporting ? null : _share,
+            icon: const Icon(Icons.share_outlined),
+          ),
+          IconButton(
+            tooltip: 'Salva in galleria',
+            onPressed: _exporting ? null : _save,
+            icon: const Icon(Icons.download_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          Expanded(child: _previewArea()),
+          if (_exporting) const LinearProgressIndicator(),
+          _tabs(),
+          SizedBox(height: 236, child: _controls()),
+        ]),
+      ),
+    );
+  }
+
+  Widget _previewArea() {
+    final pv = widget.photo.preview;
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(children: [
+        Expanded(
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: pv.width / pv.height,
+              child: LayoutBuilder(builder: (context, box) {
+                final size = box.biggest;
+                return GestureDetector(
+                  onLongPressStart: (_) => setState(() => _showOriginal = true),
+                  onLongPressEnd: (_) => setState(() => _showOriginal = false),
+                  onScaleStart: (d) {
+                    if (_tab != _Tab.dial || !_p.dialOn) return;
+                    _dialAtStart = _p.dial;
+                    _focalAtStart = d.localFocalPoint;
+                  },
+                  onScaleUpdate: (d) {
+                    final start = _dialAtStart;
+                    if (start == null) return;
+                    final delta = d.localFocalPoint - _focalAtStart;
+                    _update(_p.copyWith(
+                      dial: start.copyWith(
+                        cx: start.cx + delta.dx / size.width,
+                        cy: start.cy + delta.dy / size.height,
+                        r: start.r * d.scale,
+                      ),
+                    ));
+                  },
+                  onScaleEnd: (_) => _dialAtStart = null,
+                  child: Stack(fit: StackFit.expand, children: [
+                    Image.memory(
+                      _showOriginal || _shown == null
+                          ? widget.photo.previewJpeg
+                          : _shown!,
+                      fit: BoxFit.fill,
+                      gaplessPlayback: true,
+                    ),
+                    if (!_showOriginal)
+                      CustomPaint(
+                        painter: _OverlayPainter(
+                          dial: _p.dial,
+                          showDial: _p.dialOn && _tab == _Tab.dial,
+                          square: _p.square,
+                          imgW: pv.width,
+                          imgH: pv.height,
+                          color: cs.secondary,
+                        ),
+                      ),
+                    if (_showOriginal)
+                      const Positioned(
+                        left: 8,
+                        top: 8,
+                        child: _Badge('Originale'),
+                      ),
+                    if (_rendering)
+                      const Positioned(
+                        right: 8,
+                        top: 8,
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                  ]),
+                );
+              }),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _tab == _Tab.dial && _p.dialOn
+              ? 'Trascina il cerchio sul quadrante, pizzica per ridimensionarlo'
+              : 'Tieni premuto sulla foto per vedere l\'originale',
+          style: Theme.of(context).textTheme.bodySmall,
+          textAlign: TextAlign.center,
+        ),
+      ]),
+    );
+  }
+
+  Widget _tabs() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: SegmentedButton<_Tab>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: _Tab.auto, label: Text('Auto')),
+          ButtonSegment(value: _Tab.light, label: Text('Luce')),
+          ButtonSegment(value: _Tab.dial, label: Text('Quadrante')),
+          ButtonSegment(value: _Tab.background, label: Text('Sfondo')),
+        ],
+        selected: {_tab},
+        onSelectionChanged: (s) => setState(() => _tab = s.first),
+      ),
+    );
+  }
+
+  Widget _controls() {
+    switch (_tab) {
+      case _Tab.auto:
+        return ListView(padding: const EdgeInsets.all(16), children: [
+          FilledButton.icon(
+            onPressed: () =>
+                _update(EnhanceParams.auto.withDial(_p.dial), now: true),
+            icon: const Icon(Icons.auto_awesome),
+            label: const Text('Migliora in un tocco'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () =>
+                _update(EnhanceParams.none.withDial(_p.dial), now: true),
+            icon: const Icon(Icons.restart_alt),
+            label: const Text('Nessun ritocco'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Colore e livelli automatici'),
+            subtitle: const Text('Toglie la dominante gialla/blu e usa tutta la gamma'),
+            value: _p.autoColor,
+            onChanged: (v) => _update(_p.copyWith(autoColor: v), now: true),
+          ),
+        ]);
+      case _Tab.light:
+        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+          _slider('Esposizione', _p.exposure, -1, 1,
+              (v) => _p.copyWith(exposure: v)),
+          _slider('Contrasto', _p.contrast, -1, 1,
+              (v) => _p.copyWith(contrast: v)),
+          _slider('Calore', _p.warmth, -1, 1, (v) => _p.copyWith(warmth: v)),
+          _slider('Schiarisci ombre', _p.shadows, 0, 1,
+              (v) => _p.copyWith(shadows: v)),
+          _slider('Recupera luci', _p.highlights, 0, 1,
+              (v) => _p.copyWith(highlights: v)),
+          _slider('Riduci rumore', _p.denoise, 0, 1,
+              (v) => _p.copyWith(denoise: v)),
+          _slider('Nitidezza', _p.sharpen, 0, 1,
+              (v) => _p.copyWith(sharpen: v)),
+        ]);
+      case _Tab.dial:
+        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+          SwitchListTile(
+            title: const Text('Ritocca il quadrante'),
+            value: _p.dialOn,
+            onChanged: (v) => _update(_p.copyWith(dialOn: v), now: true),
+          ),
+          _slider('Dettaglio', _p.detail, 0, 1, (v) => _p.copyWith(detail: v),
+              enabled: _p.dialOn),
+          _slider('Anti-riflesso vetro', _p.glare, 0, 1,
+              (v) => _p.copyWith(glare: v),
+              enabled: _p.dialOn),
+          _slider('Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),
+              enabled: _p.dialOn),
+        ]);
+      case _Tab.background:
+        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+          _slider('Sfondo bianco', _p.background, 0, 1,
+              (v) => _p.copyWith(background: v)),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Funziona con uno sfondo chiaro (foglio bianco o grigio): lo porta '
+              'al bianco pulito senza toccare il quadrante.',
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Ritaglio quadrato 1:1'),
+            subtitle: const Text('Centrato sul quadrante, ideale per annunci e Instagram'),
+            value: _p.square,
+            onChanged: (v) => setState(() => _p = _p.copyWith(square: v)),
+          ),
+        ]);
+    }
+  }
+
+  Widget _slider(String label, double value, double min, double max,
+      EnhanceParams Function(double) apply,
+      {bool enabled = true}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(children: [
+        SizedBox(
+          width: 128,
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: enabled ? null : Theme.of(context).disabledColor)),
+        ),
+        Expanded(
+          child: Slider(
+            value: value.clamp(min, max).toDouble(),
+            min: min,
+            max: max,
+            onChanged: enabled ? (v) => _update(apply(v)) : null,
+          ),
+        ),
+        SizedBox(
+          width: 34,
+          child: Text(
+            (value * 100).round().toString(),
+            textAlign: TextAlign.right,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final String text;
+  const _Badge(this.text);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(text, style: const TextStyle(color: Colors.white)),
+      );
+}
+
+class _OverlayPainter extends CustomPainter {
+  final Dial dial;
+  final bool showDial;
+  final bool square;
+  final int imgW, imgH;
+  final Color color;
+
+  _OverlayPainter({
+    required this.dial,
+    required this.showDial,
+    required this.square,
+    required this.imgW,
+    required this.imgH,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (square) {
+      // stessa regola di cropSquare, in coordinate dello schermo
+      final side = math.min(imgW, imgH);
+      final x0 = (dial.cx * imgW - side / 2).round().clamp(0, imgW - side);
+      final y0 = (dial.cy * imgH - side / 2).round().clamp(0, imgH - side);
+      final sx = size.width / imgW, sy = size.height / imgH;
+      final rect = Rect.fromLTWH(x0 * sx, y0 * sy, side * sx, side * sy);
+      final dim = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(Offset.zero & size)
+        ..addRect(rect);
+      canvas.drawPath(dim, Paint()..color = Colors.black45);
+      canvas.drawRect(
+          rect,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..color = Colors.white70);
+    }
+    if (showDial) {
+      final c = Offset(dial.cx * size.width, dial.cy * size.height);
+      final r = dial.r * math.min(size.width, size.height);
+      canvas.drawCircle(
+          c,
+          r,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..color = Colors.black38);
+      canvas.drawCircle(
+          c,
+          r,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..color = color);
+      canvas.drawCircle(c, 4, Paint()..color = color);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OverlayPainter old) =>
+      old.dial != dial ||
+      old.showDial != showDial ||
+      old.square != square ||
+      old.color != color;
+}

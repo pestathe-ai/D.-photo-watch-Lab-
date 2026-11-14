@@ -1,0 +1,34 @@
+name: d_photo_watch_lab
+description: "D. Photo Watch Lab - migliora le foto degli orologi da vendere, tutto sul telefono."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  image: ^4.13.0
+  image_picker: ^1.2.4
+  gal: ^3.0.0
+  path_provider: ^2.1.6
+  share_plus: ^13.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#1D3A8A"
+  adaptive_icon_foreground: "assets/icon/foreground.png"
+  min_sdk_android: 24
+  remove_alpha_ios: true
