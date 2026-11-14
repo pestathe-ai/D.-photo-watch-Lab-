@@ -22,6 +22,28 @@ for f in android/app/build.gradle.kts android/app/build.gradle; do
   sed -i -E 's/minSdk(Version)? *=? *flutter\.minSdkVersion/minSdk = 24/' "$f"
 done
 
+# Il lint "vital" di Android va in crash su alcuni plugin (bug degli
+# strumenti Google, NoSuchMethodError in JavaDocParser): lo disattiviamo.
+if [ -f android/build.gradle.kts ]; then
+  cat >> android/build.gradle.kts <<'GRADLE'
+
+subprojects {
+    tasks.configureEach {
+        if (name.contains("lintVital")) enabled = false
+    }
+}
+GRADLE
+elif [ -f android/build.gradle ]; then
+  cat >> android/build.gradle <<'GRADLE'
+
+subprojects {
+    tasks.configureEach { t ->
+        if (t.name.contains("lintVital")) t.enabled = false
+    }
+}
+GRADLE
+fi
+
 # iOS: descrizioni per foto e fotocamera (solo su macOS).
 if [ "$(uname)" = "Darwin" ] && [ -f ios/Runner/Info.plist ]; then
   /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Per scegliere le foto degli orologi.'" ios/Runner/Info.plist || true
