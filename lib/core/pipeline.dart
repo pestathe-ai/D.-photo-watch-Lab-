@@ -185,7 +185,9 @@ Analysis analyze(Planes p) {
   final mg = math.max(sg / cnt, 1e-3);
   final mb = math.max(sb / cnt, 1e-3);
   final mean = (mr + mg + mb) / 3;
-  double cl(double g) => g.clamp(0.7, 1.4).toDouble();
+  // Correzione solo parziale (60%) verso il grigio neutro: togliere tutta la
+  // luce calda rende le foto fredde e "da scanner".
+  double cl(double g) => (1 + 0.6 * (g.clamp(0.7, 1.4) - 1)).toDouble();
   final gr = cl(mean / mr), gg = cl(mean / mg), gb = cl(mean / mb);
 
   final lb = Float32List(n);

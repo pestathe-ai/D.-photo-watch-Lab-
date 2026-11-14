@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+import 'dial_finder.dart';
 import 'params.dart';
 import 'pipeline.dart';
 
@@ -74,8 +75,10 @@ class LoadedPhoto {
   final RgbImage preview;
   final Analysis analysis;
   final Uint8List previewJpeg;
+  final DialGuess dialGuess;
 
-  LoadedPhoto(this.full, this.preview, this.analysis, this.previewJpeg);
+  LoadedPhoto(this.full, this.preview, this.analysis, this.previewJpeg,
+      this.dialGuess);
 }
 
 LoadedPhoto? loadPhoto(Uint8List bytes) {
@@ -83,7 +86,51 @@ LoadedPhoto? loadPhoto(Uint8List bytes) {
   if (full == null) return null;
   final preview = shrink(full, kPreviewMaxSide);
   final analysis = analyze(Planes.fromRgb(preview));
-  return LoadedPhoto(full, preview, analysis, encodeJpeg(preview, quality: 90));
+  return LoadedPhoto(full, preview, analysis, encodeJpeg(preview, quality: 90),
+      findDial(preview));
+}
+
+/// Parametri "Migliora in un tocco" per una foto, con il quadrante trovato
+/// da solo (se non lo trova, il ritocco del quadrante resta spento).
+EnhanceParams autoParamsFor(DialGuess g) => g.found
+    ? EnhanceParams.auto.withDial(g.dial)
+    : EnhanceParams.auto.copyWith(dialOn: false);
+
+/// Per la modalità a più foto: analisi, quadrante e anteprima già migliorata,
+/// senza tenere in memoria la foto grande.
+class BatchPrepared {
+  final Analysis analysis;
+  final DialGuess dialGuess;
+  final EnhanceParams params;
+  final Uint8List thumbJpeg;
+
+  BatchPrepared(this.analysis, this.dialGuess, this.params, this.thumbJpeg);
+}
+
+BatchPrepared? prepareBatchItem(Uint8List bytes) {
+  final preview = decodeToRgb(bytes, kPreviewMaxSide);
+  if (preview == null) return null;
+  final analysis = analyze(Planes.fromRgb(preview));
+  final guess = findDial(preview);
+  final params = autoParamsFor(guess);
+  final thumb = renderJpeg(preview, analysis, params.copyWith(square: false),
+      quality: 85);
+  return BatchPrepared(analysis, guess, params, thumb);
+}
+
+/// Esporta una foto della serie alla misura piena.
+class ExportJob {
+  final Uint8List bytes;
+  final Analysis analysis;
+  final EnhanceParams params;
+
+  ExportJob(this.bytes, this.analysis, this.params);
+}
+
+Uint8List? runExportJob(ExportJob j) {
+  final full = decodeToRgb(j.bytes, kExportMaxSide);
+  if (full == null) return null;
+  return renderJpeg(full, j.analysis, j.params, quality: 93);
 }
 
 /// Ritocca e codifica in JPG (usato sia per l'anteprima sia per il salvataggio).

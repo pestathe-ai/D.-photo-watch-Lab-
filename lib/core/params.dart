@@ -79,6 +79,7 @@ class EnhanceParams {
   /// Il "Migliora in un tocco": valori provati sul prototipo.
   static const auto = EnhanceParams(
     autoColor: true,
+    warmth: 0.2,
     contrast: 0.15,
     shadows: 0.2,
     highlights: 0.3,

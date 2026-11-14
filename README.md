@@ -3,6 +3,15 @@
 App Android che migliora le foto degli orologi da mettere in vendita.
 Tutto avviene **sul telefono**: nessun caricamento, nessuna chiave, funziona anche offline.
 
+## Novità v0.2
+- **Più foto insieme**: selezioni fino a 30 foto, le migliora tutte in automatico e le salva
+  o condivide in un colpo. Tocchi una foto per ritoccarla a mano, poi "Applica a tutte"
+  copia le stesse regolazioni sulle altre.
+- **Quadrante trovato da solo** in ogni foto (anche in quella singola). Se non lo trova,
+  la foto ha un segnale arancio e il cerchio lo posizioni tu.
+- **Foto meno fredde**: il bilanciamento del bianco corregge solo in parte la luce calda,
+  e "Migliora in un tocco" lascia un filo di calore.
+
 ## Cosa fa (v0.1)
 - **Migliora in un tocco**: bilanciamento del bianco (toglie la dominante gialla o blu),
   livelli automatici, ombre e luci, contrasto, riduzione del rumore che tiene i bordi, nitidezza.
@@ -16,6 +25,7 @@ Tutto avviene **sul telefono**: nessun caricamento, nessuna chiave, funziona anc
 - **Salva** in galleria (album "D. Photo Watch Lab") o **Condividi** direttamente.
 
 ## Limiti
+- Il quadrante viene cercato come cerchio: funziona bene su foto frontali, meno su foto molto di lato o su casse non tonde (Tank, Santos...).
 - Non è un'IA generativa: non inventa dettagli che la foto non ha. Una foto mossa o molto sfocata migliora poco.
 - "Sfondo bianco" funziona su sfondi già chiari e poco colorati, non scontorna sfondi qualsiasi.
 - La foto salvata ha il lato lungo massimo di 2400 px (più che sufficiente per Vinted, Subito, eBay, Chrono24).

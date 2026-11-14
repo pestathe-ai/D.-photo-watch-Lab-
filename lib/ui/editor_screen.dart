@@ -30,7 +30,21 @@ enum _Tab { auto, light, dial, background }
 
 class EditorScreen extends StatefulWidget {
   final LoadedPhoto photo;
-  const EditorScreen({super.key, required this.photo});
+
+  /// Regolazioni di partenza (dalla serie di foto); se null usa
+  /// "Migliora in un tocco" con il quadrante trovato da solo.
+  final EnhanceParams? initial;
+
+  /// Nella serie: al posto di Salva/Condividi c'è "Fatto", che torna
+  /// indietro con le regolazioni.
+  final bool batchMode;
+
+  const EditorScreen({
+    super.key,
+    required this.photo,
+    this.initial,
+    this.batchMode = false,
+  });
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -53,8 +67,11 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
-    // cerchio iniziale: centrato, circa due terzi del lato corto
-    _p = EnhanceParams.auto.withDial(const Dial(r: 0.32));
+    _p = widget.initial ?? autoParamsFor(widget.photo.dialGuess);
+    // se il quadrante non è stato trovato, il cerchio parte dal centro
+    if (!widget.photo.dialGuess.found && widget.initial == null) {
+      _p = _p.copyWith(dial: const Dial(r: 0.32));
+    }
     _render();
   }
 
@@ -144,7 +161,15 @@ class _EditorScreenState extends State<EditorScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Ritocco'),
-        actions: [
+        actions: widget.batchMode
+            ? [
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).pop(_p),
+                  icon: const Icon(Icons.check),
+                  label: const Text('Fatto'),
+                ),
+              ]
+            : [
           IconButton(
             tooltip: 'Condividi',
             onPressed: _exporting ? null : _share,

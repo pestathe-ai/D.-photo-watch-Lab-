@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:d_photo_watch_lab/core/codec.dart';
+import 'package:d_photo_watch_lab/core/dial_finder.dart';
 import 'package:d_photo_watch_lab/core/params.dart';
 import 'package:d_photo_watch_lab/core/pipeline.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,6 +65,24 @@ RgbImage synthetic({bool dust = true}) {
 }
 
 int _c(double v) => (v * 255).round().clamp(0, 255);
+
+/// Orologio semplice in posizione e misura qualsiasi (cassa rc, quadrante rd).
+RgbImage drawWatch(int w, int h, double cx, double cy, double rc, double rd) {
+  final rnd = math.Random(5);
+  final rgb = Uint8List(w * h * 3);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final d = math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+      final v = d < rd ? 0.12 : (d < rc ? 0.47 : 0.78);
+      final i = (y * w + x) * 3;
+      final n = (rnd.nextDouble() - 0.5) * 0.06;
+      rgb[i] = _c(v + n);
+      rgb[i + 1] = _c((v + n) * 0.97);
+      rgb[i + 2] = _c((v + n) * 0.9);
+    }
+  }
+  return RgbImage(w, h, rgb);
+}
 
 double lumAt(Planes p, int x, int y) {
   final i = y * p.w + x;
@@ -160,6 +179,41 @@ void main() {
     });
   });
 
+  group('trova il quadrante', () {
+    test('al centro, dentro la cassa', () {
+      final g = findDial(synthetic());
+      expect(g.found, isTrue);
+      expect(g.dial.cx, closeTo(0.5, 0.02));
+      expect(g.dial.cy, closeTo(0.5, 0.02));
+      // il quadrante (r 180), non la cassa (r 215)
+      expect(g.dial.r, closeTo(180 / 600, 0.02));
+    });
+
+    test('decentrato e in verticale', () {
+      final g = findDial(drawWatch(600, 800, 330, 380, 230, 190));
+      expect(g.found, isTrue);
+      expect(g.dial.cx, closeTo(330 / 600, 0.02));
+      expect(g.dial.cy, closeTo(380 / 800, 0.02));
+      expect(g.dial.r, closeTo(190 / 600, 0.02));
+    });
+
+    test('su una foto senza orologio non trova niente', () {
+      final rgb = Uint8List(W * H * 3);
+      final rnd = math.Random(4);
+      for (var i = 0; i < rgb.length; i++) {
+        rgb[i] = 170 + rnd.nextInt(10);
+      }
+      expect(findDial(RgbImage(W, H, rgb)).found, isFalse);
+    });
+  });
+
+  test('il colore automatico non raffredda del tutto la luce calda', () {
+    final out = enhance(synthetic(dust: false), analyze(Planes.fromRgb(synthetic())),
+        EnhanceParams.none.copyWith(autoColor: true));
+    const i = 10 * W + 10; // carta dello sfondo, con luce calda
+    expect(out.r[i], greaterThan(out.b[i] + 0.02));
+  });
+
   test('ritaglio quadrato centrato sul quadrante', () {
     final out = enhance(synthetic(dust: false), Analysis.neutral,
         EnhanceParams.none.copyWith(square: true, dialOn: true, dial: dial));
@@ -177,6 +231,17 @@ void main() {
     final small = decodeToRgb(jpg, 400)!;
     expect(small.width, 400);
     expect(small.height, 300);
+  });
+
+  test('serie: preparazione ed esportazione di una foto', () {
+    final jpg = encodeJpeg(synthetic());
+    final prep = prepareBatchItem(jpg)!;
+    expect(prep.dialGuess.found, isTrue);
+    expect(prep.params.dialOn, isTrue);
+    expect(prep.thumbJpeg.length, greaterThan(1000));
+    final out = runExportJob(ExportJob(jpg, prep.analysis, prep.params))!;
+    final back = decodeToRgb(out, 4000)!;
+    expect(back.width, W);
   });
 
   test('caricamento completo e render', () {

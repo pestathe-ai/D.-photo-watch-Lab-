@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/codec.dart';
+import 'batch_screen.dart';
 import 'editor_screen.dart';
 import 'theme.dart';
 
@@ -17,10 +18,32 @@ class _HomeScreenState extends State<HomeScreen> {
   final _picker = ImagePicker();
   bool _loading = false;
 
+  /// Galleria: una o più foto. Con più foto si apre la modalità serie.
+  Future<void> _pickGallery() async {
+    try {
+      final files = await _picker.pickMultiImage(imageQuality: 100, limit: 30);
+      if (files.isEmpty || !mounted) return;
+      if (files.length == 1) return _open(files.first);
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => BatchScreen(files: files),
+      ));
+    } catch (e) {
+      if (mounted) _snack('Errore: $e');
+    }
+  }
+
   Future<void> _pick(ImageSource source) async {
     try {
       final file = await _picker.pickImage(source: source, imageQuality: 100);
       if (file == null) return;
+      await _open(file);
+    } catch (e) {
+      if (mounted) _snack('Errore: $e');
+    }
+  }
+
+  Future<void> _open(XFile file) async {
+    try {
       setState(() => _loading = true);
       final bytes = await file.readAsBytes();
       final photo = await compute(loadPhoto, bytes);
@@ -87,12 +110,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 28),
                   FilledButton.icon(
-                    onPressed: () => _pick(ImageSource.gallery),
+                    onPressed: _pickGallery,
                     icon: const Icon(Icons.photo_library_outlined),
                     label: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Text('Scegli una foto'),
+                      child: Text('Scegli le foto'),
                     ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Puoi selezionarne più di una (fino a 30): le migliora tutte insieme.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
