@@ -55,6 +55,9 @@ void main() {
     await tester.pump();
     expect(find.text('D. Photo Watch Lab'), findsOneWidget);
     expect(find.text('Scegli le foto'), findsOneWidget);
+    // la firma è in fondo: ci si arriva scorrendo
+    await tester.scrollUntilVisible(find.text("un'app Dom Studio"), 200,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text("un'app Dom Studio"), findsOneWidget);
   });
 
