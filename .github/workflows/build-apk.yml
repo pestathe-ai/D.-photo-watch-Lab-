@@ -68,6 +68,19 @@ jobs:
             exit 1
           fi
 
+      - name: Controllo APK (codice non offuscato)
+        run: |
+          APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          unzip -o -q "$APK" 'classes*.dex' -d dexcheck
+          for c in com/google/mlkit/vision/segmentation/subject/SubjectSegmenterOptions \
+                   com/google/mediapipe/tasks/vision/interactivesegmenter/InteractiveSegmenter; do
+            if ! cat dexcheck/classes*.dex | grep -a -q "L$c;"; then
+              echo "::error title=apk::classe $c assente o offuscata"
+              exit 1
+            fi
+          done
+          echo "APK ok: ML Kit e MediaPipe presenti con i nomi originali"
+
       - name: Firma APK
         run: |
           set -o pipefail

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:path_provider/path_provider.dart';
@@ -199,7 +200,10 @@ class _EditorScreenState extends State<EditorScreen> {
       setState(() => _aiStatus = 'Quadrante trovato dall\'IA di Google.');
       _update(_p.copyWith(shape: shape, dialOn: true), now: true);
     } catch (e) {
-      if (mounted) setState(() => _aiStatus = 'IA non disponibile: $e');
+      var msg = e is PlatformException ? (e.message ?? e.code) : '$e';
+      msg = msg.split('\n').first;
+      if (msg.length > 140) msg = '${msg.substring(0, 140)}…';
+      if (mounted) setState(() => _aiStatus = 'IA non disponibile: $msg');
     }
   }
 

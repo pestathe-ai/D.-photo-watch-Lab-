@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:google_mlkit_subject_segmentation/google_mlkit_subject_segmentation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -49,8 +50,11 @@ class Cutout {
       lastError = null;
       return SubjectMask(width, height, mask);
     } catch (e) {
-      final msg = '$e';
-      lastError = msg.toLowerCase().contains('download')
+      var msg = e is PlatformException ? (e.message ?? e.code) : '$e';
+      msg = msg.split('\n').first;
+      if (msg.length > 120) msg = '${msg.substring(0, 120)}…';
+      lastError = msg.toLowerCase().contains('download') ||
+              msg.toLowerCase().contains('waiting')
           ? 'il modello IA di Google si sta ancora scaricando, riprova tra poco'
           : msg;
       return null;

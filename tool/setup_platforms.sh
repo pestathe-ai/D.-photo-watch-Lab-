@@ -66,11 +66,13 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.26")
 }
 GRADLE
-  # assicura che le regole ProGuard siano usate anche in release
-  if ! grep -q 'proguard-rules.pro' android/app/build.gradle.kts; then
-    sed -i 's#signingConfig = signingConfigs.getByName("debug")#signingConfig = signingConfigs.getByName("debug")\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")#' android/app/build.gradle.kts
-  fi
+  # Niente compattazione/offuscamento del codice (R8): rompeva lo scontorno
+  # IA di Google (NullPointerException dentro ML Kit). Per un'app installata
+  # a mano l'APK un po' più grande non conta.
+  sed -i 's#signingConfig = signingConfigs.getByName("debug")#signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false\n            isShrinkResources = false#' android/app/build.gradle.kts
+  grep -q 'isMinifyEnabled = false' android/app/build.gradle.kts || { echo "minify non disattivato"; exit 1; }
 else
+  sed -i 's#signingConfig signingConfigs.debug#signingConfig signingConfigs.debug\n            minifyEnabled false\n            shrinkResources false#' android/app/build.gradle
   cat >> android/app/build.gradle <<'GRADLE'
 
 dependencies {
