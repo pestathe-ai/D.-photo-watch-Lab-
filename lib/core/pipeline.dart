@@ -604,9 +604,9 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
 
 // Curva dei toni "ricca" e calore nelle luci, misurati sulle coppie
 // prima/dopo dell'utente (punti ogni 0.1 di luminosità).
-const _richY = [0.03, 0.10, 0.155, 0.235, 0.35, 0.465, 0.57, 0.67, 0.765, 0.865, 0.96];
-const _warmR = [0.0, 0, 0, 0, 0, 0, 0.005, 0.01, 0.02, 0.015, 0.01];
-const _warmB = [0.0, 0, 0, 0, 0, 0, -0.005, -0.015, -0.025, -0.01, 0];
+const _richY = <double>[0.03, 0.10, 0.155, 0.235, 0.35, 0.465, 0.57, 0.67, 0.765, 0.865, 0.96];
+const _warmR = <double>[0, 0, 0, 0, 0, 0, 0.005, 0.01, 0.02, 0.015, 0.01];
+const _warmB = <double>[0, 0, 0, 0, 0, 0, -0.005, -0.015, -0.025, -0.01, 0];
 
 double _interp(double v, List<double> ys) {
   final x = v.clamp(0.0, 1.0) * 10;
