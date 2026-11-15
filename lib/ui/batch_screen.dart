@@ -61,7 +61,7 @@ class _BatchScreenState extends State<BatchScreen> {
         } else {
           it.analysis = r.analysis;
           it.params = r.params;
-          it.dialFound = r.dialGuess.found;
+          it.dialFound = r.dialFound;
           it.subject = await Cutout.maskFor(r.previewJpeg, r.previewW, r.previewH);
           if (it.subject != null) _cutoutOk++;
           it.thumb = await compute(
@@ -144,6 +144,8 @@ class _BatchScreenState extends State<BatchScreen> {
       final own = it.params!;
       it.params = src.copyWith(
         dial: own.dial,
+        shape: own.shape,
+        clearShape: own.shape == null,
         dialOn: src.dialOn && (it.dialFound || own.dialOn),
       );
     }

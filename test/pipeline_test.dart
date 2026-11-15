@@ -5,6 +5,8 @@ import 'package:d_photo_watch_lab/core/codec.dart';
 import 'package:d_photo_watch_lab/core/dial_finder.dart';
 import 'package:d_photo_watch_lab/core/params.dart';
 import 'package:d_photo_watch_lab/core/pipeline.dart';
+import 'package:d_photo_watch_lab/core/shape.dart';
+import 'package:d_photo_watch_lab/services/magic_touch.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Foto finta: sfondo carta grigio-giallo, cassa, quadrante blu scuro,
@@ -65,6 +67,76 @@ RgbImage synthetic({bool dust = true}) {
 }
 
 int _c(double v) => (v * 255).round().clamp(0, 255);
+
+/// Orologio rettangolare su velluto nero, come le foto dell'utente:
+/// cinturino rosso, cassa oro, quadrante champagne con scritte e lancette,
+/// pelucchi chiari sullo sfondo. Quadrante: x 330..470, y 200..400.
+const rectDial = [330, 200, 470, 400];
+const lint = [
+  [60, 80],
+  [700, 120],
+  [120, 500],
+  [650, 520],
+];
+
+RgbImage rectWatch() {
+  const w = 800, h = 600;
+  final rnd = math.Random(7);
+  final rgb = Uint8List(w * h * 3);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      double r, g, b;
+      if (x >= rectDial[0] && x < rectDial[2] && y >= rectDial[1] && y < rectDial[3]) {
+        r = 0.80;
+        g = 0.72;
+        b = 0.55;
+        // scritta "CITIZEN" finta e lancette
+        if (y >= 240 && y < 246 && x > 375 && x < 425) r = g = b = 0.12;
+        if ((x - 400).abs() <= 1 && y > 225 && y < 300) {
+          r = 0.75;
+          g = 0.6;
+          b = 0.3;
+        }
+        if ((y - 300).abs() <= 1 && x > 400 && x < 460) {
+          r = 0.75;
+          g = 0.6;
+          b = 0.3;
+        }
+      } else if (x >= 310 && x < 490 && y >= 175 && y < 425) {
+        r = 0.85;
+        g = 0.7;
+        b = 0.3; // cassa oro
+      } else if (x >= 345 && x < 455) {
+        r = 0.42;
+        g = 0.15;
+        b = 0.14; // cinturino
+      } else {
+        r = g = b = 0.13; // velluto
+      }
+      final n = (rnd.nextDouble() - 0.5) * 0.06;
+      final i = (y * w + x) * 3;
+      rgb[i] = _c(r + n);
+      rgb[i + 1] = _c(g + n);
+      rgb[i + 2] = _c(b + n);
+    }
+  }
+  for (final l in lint) {
+    for (var dy = 0; dy < 3; dy++) {
+      for (var dx = 0; dx < 3; dx++) {
+        final i = ((l[1] + dy) * w + l[0] + dx) * 3;
+        rgb[i] = rgb[i + 1] = rgb[i + 2] = 150;
+      }
+    }
+  }
+  return RgbImage(w, h, rgb);
+}
+
+double satAt(Planes p, int x, int y) {
+  final i = y * p.w + x;
+  final mx = math.max(p.r[i], math.max(p.g[i], p.b[i]));
+  final mn = math.min(p.r[i], math.min(p.g[i], p.b[i]));
+  return (mx - mn) / math.max(mx, 1e-3);
+}
 
 /// Orologio semplice in posizione e misura qualsiasi (cassa rc, quadrante rd).
 RgbImage drawWatch(int w, int h, double cx, double cy, double rc, double rd) {
@@ -131,13 +203,14 @@ void main() {
     }
   });
 
-  group('migliora in un tocco', () {
+  group('stile naturale con sfondo bianco', () {
     late Planes out;
     late Planes before;
     setUpAll(() {
       final src = synthetic();
       before = Planes.fromRgb(src);
-      out = enhance(src, analyze(before), EnhanceParams.auto.withDial(dial));
+      out = enhance(src, analyze(before),
+          EnhanceParams.natural.copyWith(background: 0.6, intensity: 1).withDial(dial));
     });
 
     test('toglie i puntini di polvere dal quadrante', () {
@@ -269,12 +342,114 @@ void main() {
   });
 
   test('intensità zero = solo colore automatico', () {
-    final p = EnhanceParams.auto.withDial(dial).copyWith(intensity: 0).effective();
+    final p = EnhanceParams.natural.withDial(dial).copyWith(intensity: 0).effective();
     expect(p.sharpen, 0);
     expect(p.smooth, 0);
     expect(p.background, 0);
     expect(p.autoColor, isTrue);
     expect(p.dialOn, isTrue);
+  });
+
+  group('quadrante di qualsiasi forma', () {
+    test('rettangolare: trova il quadrante e non la cassa', () {
+      final sh = findDialShape(rectWatch())!;
+      double minX = 1, maxX = 0, minY = 1, maxY = 0;
+      for (var i = 0; i < sh.length; i++) {
+        minX = math.min(minX, sh.pts[2 * i]);
+        maxX = math.max(maxX, sh.pts[2 * i]);
+        minY = math.min(minY, sh.pts[2 * i + 1]);
+        maxY = math.max(maxY, sh.pts[2 * i + 1]);
+      }
+      expect(minX * 800, closeTo(rectDial[0], 8));
+      expect(maxX * 800, closeTo(rectDial[2], 8));
+      expect(minY * 600, closeTo(rectDial[1], 8));
+      expect(maxY * 600, closeTo(rectDial[3], 8));
+    });
+
+    test('tondo: trova il quadrante al centro', () {
+      final sh = findDialShape(synthetic())!;
+      final c = sh.centroid;
+      expect(c.x, closeTo(0.5, 0.02));
+      expect(c.y, closeTo(0.5, 0.02));
+      expect(sh.area, closeTo(math.pi * 180 * 180 / (800 * 600), 0.03));
+    });
+
+    test('su una foto senza orologio non trova niente', () {
+      final rgb = Uint8List(W * H * 3);
+      final rnd = math.Random(4);
+      for (var i = 0; i < rgb.length; i++) {
+        rgb[i] = 170 + rnd.nextInt(10);
+      }
+      expect(findDialShape(RgbImage(W, H, rgb)), isNull);
+    });
+
+    test('il contorno si trasforma in maschera della misura giusta', () {
+      const sh = DialShape([0.25, 0.25, 0.75, 0.25, 0.75, 0.75, 0.25, 0.75]);
+      final m = sh.rasterize(100, 80, feather: 0);
+      var sum = 0.0;
+      for (final v in m) {
+        sum += v;
+      }
+      expect(sum / m.length, closeTo(0.25, 0.02));
+      final c = sh.centroid;
+      expect(c.x, closeTo(0.5, 1e-6));
+      final moved = sh.transformed(0.1, 0, 0.5);
+      expect(moved.centroid.x, closeTo(0.6, 1e-6));
+      expect(moved.area, closeTo(0.0625, 1e-6));
+    });
+
+    test('IA: sceglie la maschera che contiene il punto toccato', () {
+      const w = 50, h = 40;
+      final bg = Float32List(w * h)..fillRange(0, w * h, 0.9);
+      final fg = Float32List(w * h);
+      for (var y = 10; y < 30; y++) {
+        for (var x = 15; x < 35; x++) {
+          fg[y * w + x] = 0.95;
+          bg[y * w + x] = 0.05;
+        }
+      }
+      // macchia staccata: non deve entrare nel contorno
+      fg[2 * w + 2] = 0.95;
+      final sh = shapeFromConfidence([bg, fg], w, h, 0.5, 0.5)!;
+      expect(sh.area, closeTo(0.2, 0.03));
+      expect(sh.centroid.x, closeTo(0.5, 0.03));
+    });
+  });
+
+  group('stile ricco', () {
+    late Planes out, before;
+    setUpAll(() {
+      final src = rectWatch();
+      before = Planes.fromRgb(src);
+      final sh = findDialShape(src)!;
+      out = enhance(src, analyze(before), EnhanceParams.rich.copyWith(shape: sh));
+    });
+
+    test('toglie i pelucchi dal velluto e lo rende più pulito', () {
+      for (final l in lint) {
+        expect(lumAt(before, l[0] + 1, l[1] + 1), greaterThan(0.5));
+        expect(lumAt(out, l[0] + 1, l[1] + 1), lessThan(0.25),
+            reason: 'pelucchio in ${l[0]},${l[1]}');
+      }
+      expect(lumAt(out, 150, 300), lessThan(lumAt(before, 150, 300) + 0.02));
+    });
+
+    test('cinturino più ricco', () {
+      expect(satAt(out, 400, 520), greaterThan(satAt(before, 400, 520)));
+    });
+
+    test('scritte e lancette del quadrante restano', () {
+      expect(lumAt(out, 400, 243), lessThan(0.25)); // scritta
+      expect(lumAt(out, 400, 270) - lumAt(out, 380, 270), lessThan(-0.02)); // lancetta
+      expect(lumAt(out, 360, 350), greaterThan(0.6)); // fondo del quadrante chiaro
+    });
+
+    test('il preset usa il contorno trovato', () {
+      final sh = findDialShape(rectWatch());
+      final p = presetFor(EnhanceParams.rich, const DialGuess(Dial(), 0), sh);
+      expect(p.shape, isNotNull);
+      expect(p.dialOn, isTrue);
+    });
   });
 
   test('ritaglio quadrato centrato sul quadrante', () {

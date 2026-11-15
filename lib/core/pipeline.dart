@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'params.dart';
+import 'shape.dart';
 
 /// Foto RGB 8 bit compatta (3 byte per pixel), usata per conservare
 /// l'originale e passarlo agli isolate.
@@ -414,7 +415,9 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
   final expo = math.pow(2, p.exposure).toDouble();
   final c = p.contrast;
   for (var i = 0; i < n; i++) {
-    var v = lum[i] * expo;
+    var v = lum[i];
+    if (p.look > 0) v += p.look * (_interp(v, _richY) - v);
+    v *= expo;
     final sh = (1 - v / 0.5).clamp(0.0, 1.0);
     v += p.shadows * 0.5 * (1 - v) * sh * sh;
     final hl = ((v - 0.6) / 0.4).clamp(0.0, 1.0);
@@ -425,7 +428,9 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
   }
 
   // 4. quadrante: riflesso e chiarezza
-  final mask = p.dialOn ? dialMask(w, h, p.dial) : Float32List(n);
+  final mask = !p.dialOn
+      ? Float32List(n)
+      : (p.shape != null ? p.shape!.rasterize(w, h) : dialMask(w, h, p.dial));
   if (p.dialOn && (p.glare > 0 || p.detail > 0)) {
     if (p.glare > 0) {
       final veil = veilMap(l2, mask, w, h);
@@ -441,13 +446,44 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
       }
     }
   }
+  // 4b. chiarezza fuori dal quadrante (cinturino, cassa): rilievo della
+  // trama senza aloni. Sul quadrante no, per non mostrare i difetti.
+  if (p.clarity > 0) {
+    final base = guidedSelf(l2, w, h, s(20), 0.004);
+    for (var i = 0; i < n; i++) {
+      l2[i] += 1.2 * p.clarity * (1 - mask[i]) * (l2[i] - base[i]);
+    }
+  }
   for (var i = 0; i < n; i++) {
     final l = lum[i];
     if (l <= 1e-3) continue;
     final k = l2[i].clamp(0.0, 1.2) / l;
-    img.r[i] = (img.r[i] * k).clamp(0.0, 1.0).toDouble();
+    var r = img.r[i] * k, b = img.b[i] * k;
+    if (p.look > 0) {
+      // leggero calore nelle luci, come nei ritocchi dell'utente
+      r += p.look * _interp(l, _warmR);
+      b += p.look * _interp(l, _warmB);
+    }
+    img.r[i] = r.clamp(0.0, 1.0).toDouble();
     img.g[i] = (img.g[i] * k).clamp(0.0, 1.0).toDouble();
-    img.b[i] = (img.b[i] * k).clamp(0.0, 1.0).toDouble();
+    img.b[i] = b.clamp(0.0, 1.0).toDouble();
+  }
+
+  // 4c. vivacità: colori già saturi (cinturino) più ricchi, quadrante quasi
+  // invariato
+  if (p.vibrance > 0) {
+    for (var i = 0; i < n; i++) {
+      final r = img.r[i], g = img.g[i], b = img.b[i];
+      final mx = math.max(r, math.max(g, b)), mn = math.min(r, math.min(g, b));
+      final sat = (mx - mn) / math.max(mx, 1e-3);
+      final gain = 1 +
+          0.24 * p.vibrance * ((sat - 0.2) / 0.3).clamp(0.0, 1.0) * (1 - 0.7 * mask[i]);
+      if (gain == 1) continue;
+      final l = 0.299 * r + 0.587 * g + 0.114 * b;
+      img.r[i] = (l + (r - l) * gain).clamp(0.0, 1.0).toDouble();
+      img.g[i] = (l + (g - l) * gain).clamp(0.0, 1.0).toDouble();
+      img.b[i] = (l + (b - l) * gain).clamp(0.0, 1.0).toDouble();
+    }
   }
 
   // 5. polvere
@@ -472,6 +508,38 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
       img.r[i] += d;
       img.g[i] += d;
       img.b[i] += d;
+    }
+  }
+
+  // 5c. sfondo scuro pulito: meno rumore, via i pelucchi del velluto,
+  // un filo più profondo. Solo zone scure e poco sature fuori dal quadrante
+  // (e fuori dall'orologio se c'è lo scontorno IA).
+  if (p.bgClean > 0) {
+    var dark = Float32List(n);
+    for (var i = 0; i < n; i++) {
+      final r = img.r[i], g = img.g[i], b = img.b[i];
+      final l = 0.299 * r + 0.587 * g + 0.114 * b;
+      final mx = math.max(r, math.max(g, b)), mn = math.min(r, math.min(g, b));
+      final sat = (mx - mn) / math.max(mx, 1e-3);
+      var t = ((0.28 - l) / 0.12).clamp(0.0, 1.0) *
+          (1 - sat / 0.35).clamp(0.0, 1.0) *
+          (1 - mask[i]);
+      if (subj != null) t *= 1 - subj[i] / 255.0;
+      dark[i] = t;
+    }
+    dark = boxBlur(dark, w, h, s(6));
+    removeDust(img, dark, p.bgClean, scale);
+    final eps = 0.0025;
+    final nr = guidedSelf(img.r, w, h, s(4), eps);
+    final ng = guidedSelf(img.g, w, h, s(4), eps);
+    final nb = guidedSelf(img.b, w, h, s(4), eps);
+    for (var i = 0; i < n; i++) {
+      final k = p.bgClean * dark[i];
+      if (k <= 0) continue;
+      final deep = 1 - 0.06 * k;
+      img.r[i] = (img.r[i] + k * (nr[i] - img.r[i])) * deep;
+      img.g[i] = (img.g[i] + k * (ng[i] - img.g[i])) * deep;
+      img.b[i] = (img.b[i] + k * (nb[i] - img.b[i])) * deep;
     }
   }
 
@@ -518,8 +586,33 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
     }
   }
 
-  if (p.square) return cropSquare(img, p.dialOn ? p.dial : const Dial());
+  if (p.square) {
+    Dial center = const Dial();
+    if (p.dialOn) {
+      final sh = p.shape;
+      if (sh != null) {
+        final c = sh.centroid;
+        center = Dial(cx: c.x, cy: c.y);
+      } else {
+        center = p.dial;
+      }
+    }
+    return cropSquare(img, center);
+  }
   return img;
+}
+
+// Curva dei toni "ricca" e calore nelle luci, misurati sulle coppie
+// prima/dopo dell'utente (punti ogni 0.1 di luminosità).
+const _richY = [0.03, 0.10, 0.155, 0.235, 0.35, 0.465, 0.57, 0.67, 0.765, 0.865, 0.96];
+const _warmR = [0.0, 0, 0, 0, 0, 0, 0.005, 0.01, 0.02, 0.015, 0.01];
+const _warmB = [0.0, 0, 0, 0, 0, 0, -0.005, -0.015, -0.025, -0.01, 0];
+
+double _interp(double v, List<double> ys) {
+  final x = v.clamp(0.0, 1.0) * 10;
+  final i = math.min(9, x.floor());
+  final t = x - i;
+  return ys[i] + (ys[i + 1] - ys[i]) * t;
 }
 
 /// Ritaglio quadrato del lato corto, centrato sul quadrante quando possibile.

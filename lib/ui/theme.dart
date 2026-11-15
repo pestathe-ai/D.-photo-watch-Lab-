@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Colori dell'app: famiglia Dom Studio, in versione rossa.
+/// Colori dell'app (famiglia Dom Studio). Solo l'icona è rossa.
 class Brand {
   static const red = Color(0xFFB3261E);
   static const blue = Color(0xFF1D3A8A);
@@ -11,11 +11,11 @@ class Brand {
 
 ThemeData buildTheme(Brightness b) {
   final scheme = ColorScheme.fromSeed(
-    seedColor: Brand.red,
+    seedColor: Brand.blue,
     brightness: b,
-    primary: b == Brightness.light ? Brand.red : const Color(0xFFFFB4AB),
+    primary: b == Brightness.light ? Brand.blue : const Color(0xFFB7C6F5),
     secondary: Brand.orange,
-    surface: b == Brightness.light ? Brand.paper : const Color(0xFF1A1111),
+    surface: b == Brightness.light ? Brand.paper : const Color(0xFF10141F),
   );
   return ThemeData(
     colorScheme: scheme,

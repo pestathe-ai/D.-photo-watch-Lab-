@@ -17,6 +17,10 @@ fi
 if ! grep -q 'mlkit.vision.DEPENDENCIES' "$MANIFEST"; then
   sed -i 's#</application>#    <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="subject_segment"/>\n    </application>#' "$MANIFEST"
 fi
+# Internet: serve solo per scaricare una volta il modello IA di Google.
+if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+  sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
+fi
 # Foto grandi: più memoria per l'app.
 sed -i 's#<application #<application android:largeHeap="true" #' "$MANIFEST"
 
@@ -47,6 +51,34 @@ subprojects {
 }
 GRADLE
 fi
+
+# IA di Google "tocca il quadrante" (MediaPipe): codice Android nativo.
+KT=$(find android/app/src/main -name MainActivity.kt | head -1)
+if [ -z "$KT" ]; then echo "MainActivity.kt non trovato"; exit 1; fi
+PKG=$(grep -m1 '^package ' "$KT")
+{ echo "$PKG"; grep -v '^package ' tool/android/MainActivity.kt; } > "$KT.new" && mv "$KT.new" "$KT"
+echo "MainActivity: $KT ($PKG)"
+cp tool/android/proguard-rules.pro android/app/proguard-rules.pro
+if [ -f android/app/build.gradle.kts ]; then
+  cat >> android/app/build.gradle.kts <<'GRADLE'
+
+dependencies {
+    implementation("com.google.mediapipe:tasks-vision:0.10.26")
+}
+GRADLE
+  # assicura che le regole ProGuard siano usate anche in release
+  if ! grep -q 'proguard-rules.pro' android/app/build.gradle.kts; then
+    sed -i 's#signingConfig = signingConfigs.getByName("debug")#signingConfig = signingConfigs.getByName("debug")\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")#' android/app/build.gradle.kts
+  fi
+else
+  cat >> android/app/build.gradle <<'GRADLE'
+
+dependencies {
+    implementation "com.google.mediapipe:tasks-vision:0.10.26"
+}
+GRADLE
+fi
+echo "--- app/build.gradle(.kts) ---"; cat android/app/build.gradle* | tail -40
 
 # iOS: descrizioni per foto e fotocamera (solo su macOS).
 if [ "$(uname)" = "Darwin" ] && [ -f ios/Runner/Info.plist ]; then

@@ -6,6 +6,7 @@ import 'package:image/image.dart' as img;
 import 'dial_finder.dart';
 import 'params.dart';
 import 'pipeline.dart';
+import 'shape.dart';
 
 /// Lato lungo massimo della foto salvata. Oltre questa misura i siti di
 /// annunci rimpiccioliscono comunque, e la memoria del telefono ringrazia.
@@ -91,10 +92,15 @@ class LoadedPhoto {
   /// scontorno IA, così la maschera ha esattamente le sue misure.
   final Uint8List previewJpeg;
   final DialGuess dialGuess;
+
+  /// Contorno del quadrante trovato da solo (qualsiasi forma), se c'è.
+  final DialShape? dialShape;
   SubjectMask? subject;
 
   LoadedPhoto(this.full, this.preview, this.analysis, this.previewJpeg,
-      this.dialGuess, {this.subject});
+      this.dialGuess, this.dialShape, {this.subject});
+
+  bool get dialFound => dialShape != null || dialGuess.found;
 }
 
 LoadedPhoto? loadPhoto(Uint8List bytes) {
@@ -103,27 +109,36 @@ LoadedPhoto? loadPhoto(Uint8List bytes) {
   final preview = shrink(full, kPreviewMaxSide);
   final analysis = analyze(Planes.fromRgb(preview));
   return LoadedPhoto(full, preview, analysis, encodeJpeg(preview, quality: 90),
-      findDial(preview));
+      findDial(preview), findDialShape(preview));
 }
 
-/// Parametri "Migliora in un tocco" per una foto, con il quadrante trovato
-/// da solo (se non lo trova, il ritocco del quadrante resta spento).
-EnhanceParams autoParamsFor(DialGuess g) => g.found
-    ? EnhanceParams.auto.withDial(g.dial)
-    : EnhanceParams.auto.copyWith(dialOn: false);
+/// Applica un preset con il quadrante trovato da solo: prima la forma
+/// (rettangolare, tonneau, tonda), poi il cerchio; se non trova niente il
+/// ritocco del quadrante resta spento.
+EnhanceParams presetFor(EnhanceParams preset, DialGuess g, DialShape? shape) {
+  if (shape != null) return preset.copyWith(shape: shape);
+  if (g.found) return preset.withDial(g.dial);
+  return preset.copyWith(dialOn: false, clearShape: true);
+}
+
+EnhanceParams autoParamsFor(DialGuess g, [DialShape? shape]) =>
+    presetFor(EnhanceParams.auto, g, shape);
 
 /// Per la modalità a più foto: analisi, quadrante e anteprima raddrizzata
 /// (per lo scontorno), senza tenere in memoria la foto grande.
 class BatchPrepared {
   final Analysis analysis;
   final DialGuess dialGuess;
+  final DialShape? dialShape;
   final EnhanceParams params;
   final Uint8List previewJpeg;
   final int previewW;
   final int previewH;
 
-  BatchPrepared(this.analysis, this.dialGuess, this.params, this.previewJpeg,
-      this.previewW, this.previewH);
+  BatchPrepared(this.analysis, this.dialGuess, this.dialShape, this.params,
+      this.previewJpeg, this.previewW, this.previewH);
+
+  bool get dialFound => dialShape != null || dialGuess.found;
 }
 
 BatchPrepared? prepareBatchItem(Uint8List bytes) {
@@ -131,7 +146,8 @@ BatchPrepared? prepareBatchItem(Uint8List bytes) {
   if (preview == null) return null;
   final analysis = analyze(Planes.fromRgb(preview));
   final guess = findDial(preview);
-  return BatchPrepared(analysis, guess, autoParamsFor(guess),
+  final shape = findDialShape(preview);
+  return BatchPrepared(analysis, guess, shape, autoParamsFor(guess, shape),
       encodeJpeg(preview, quality: 90), preview.width, preview.height);
 }
 

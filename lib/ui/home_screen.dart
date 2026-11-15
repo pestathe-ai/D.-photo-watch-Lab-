@@ -87,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: Brand.red,
+                        color: Brand.blue,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Icon(Icons.auto_awesome,

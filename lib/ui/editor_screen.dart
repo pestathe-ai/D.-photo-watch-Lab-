@@ -12,7 +12,9 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 import '../core/codec.dart';
 import '../core/params.dart';
 import '../core/pipeline.dart';
+import '../core/shape.dart';
 import '../services/cutout.dart';
+import '../services/magic_touch.dart';
 
 /// Lavoro da mandare a un isolate: solo dati semplici.
 class RenderJob {
@@ -62,16 +64,22 @@ class _EditorScreenState extends State<EditorScreen> {
   _Tab _tab = _Tab.auto;
   Timer? _debounce;
 
-  // gesto sul cerchio del quadrante
+  // gesto sul contorno del quadrante
   Dial? _dialAtStart;
+  DialShape? _shapeAtStart;
   Offset _focalAtStart = Offset.zero;
+
+  // "tocca il quadrante" con l'IA di Google
+  bool _tapMode = false;
+  String? _aiStatus;
 
   @override
   void initState() {
     super.initState();
-    _p = widget.initial ?? autoParamsFor(widget.photo.dialGuess);
+    _p = widget.initial ??
+        autoParamsFor(widget.photo.dialGuess, widget.photo.dialShape);
     // se il quadrante non è stato trovato, il cerchio parte dal centro
-    if (!widget.photo.dialGuess.found && widget.initial == null) {
+    if (!widget.photo.dialFound && widget.initial == null) {
       _p = _p.copyWith(dial: const Dial(r: 0.32));
     }
     _render();
@@ -140,6 +148,60 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  /// Cerchio che contiene grosso modo il contorno (per "Usa cerchio").
+  Dial _circleAround(DialShape sh) {
+    final c = sh.centroid;
+    final pv = widget.photo.preview;
+    final mn = math.min(pv.width, pv.height);
+    double r = 0;
+    for (var i = 0; i < sh.length; i++) {
+      final dx = (sh.pts[2 * i] - c.x) * pv.width;
+      final dy = (sh.pts[2 * i + 1] - c.y) * pv.height;
+      r = math.max(r, math.sqrt(dx * dx + dy * dy));
+    }
+    return Dial(cx: c.x, cy: c.y, r: (0.9 * r / mn).clamp(0.05, 0.75));
+  }
+
+  void _redetect() {
+    final ph = widget.photo;
+    final next = presetFor(_p, ph.dialGuess, ph.dialShape).copyWith(dialOn: true);
+    _update(ph.dialFound ? next : next.copyWith(dial: const Dial(r: 0.32)),
+        now: true);
+    setState(() => _aiStatus = ph.dialFound
+        ? null
+        : 'Non lo trovo da solo: prova "Tocca il quadrante (IA)".');
+  }
+
+  Future<void> _magicTouch(double x, double y) async {
+    setState(() {
+      _tapMode = false;
+      _aiStatus = 'IA di Google al lavoro…';
+    });
+    try {
+      final ready = await MagicTouch.isModelReady();
+      if (!ready && mounted) {
+        setState(() => _aiStatus = 'Scarico l\'IA di Google (una volta sola, ~6 MB)…');
+      }
+      final shape = await MagicTouch.segment(widget.photo.previewJpeg, x, y,
+          onProgress: (v) {
+        if (mounted) {
+          setState(() => _aiStatus =
+              'Scarico l\'IA di Google (una volta sola): ${(v * 100).round()}%');
+        }
+      });
+      if (!mounted) return;
+      if (shape == null) {
+        setState(() => _aiStatus =
+            'L\'IA non ha trovato un contorno credibile: tocca più al centro del quadrante.');
+        return;
+      }
+      setState(() => _aiStatus = 'Quadrante trovato dall\'IA di Google.');
+      _update(_p.copyWith(shape: shape, dialOn: true), now: true);
+    } catch (e) {
+      if (mounted) setState(() => _aiStatus = 'IA non disponibile: $e');
+    }
+  }
 
   Future<File?> _exportFile() async {
     setState(() => _exporting = true);
@@ -234,24 +296,39 @@ class _EditorScreenState extends State<EditorScreen> {
                 return GestureDetector(
                   onLongPressStart: (_) => setState(() => _showOriginal = true),
                   onLongPressEnd: (_) => setState(() => _showOriginal = false),
+                  onTapUp: (d) {
+                    if (!_tapMode) return;
+                    _magicTouch(d.localPosition.dx / size.width,
+                        d.localPosition.dy / size.height);
+                  },
                   onScaleStart: (d) {
-                    if (_tab != _Tab.dial || !_p.dialOn) return;
+                    if (_tab != _Tab.dial || !_p.dialOn || _tapMode) return;
                     _dialAtStart = _p.dial;
+                    _shapeAtStart = _p.shape;
                     _focalAtStart = d.localFocalPoint;
                   },
                   onScaleUpdate: (d) {
                     final start = _dialAtStart;
                     if (start == null) return;
                     final delta = d.localFocalPoint - _focalAtStart;
-                    _update(_p.copyWith(
-                      dial: start.copyWith(
-                        cx: start.cx + delta.dx / size.width,
-                        cy: start.cy + delta.dy / size.height,
-                        r: start.r * d.scale,
-                      ),
-                    ));
+                    final dx = delta.dx / size.width, dy = delta.dy / size.height;
+                    final sh = _shapeAtStart;
+                    if (sh != null) {
+                      _update(_p.copyWith(shape: sh.transformed(dx, dy, d.scale)));
+                    } else {
+                      _update(_p.copyWith(
+                        dial: start.copyWith(
+                          cx: start.cx + dx,
+                          cy: start.cy + dy,
+                          r: start.r * d.scale,
+                        ),
+                      ));
+                    }
                   },
-                  onScaleEnd: (_) => _dialAtStart = null,
+                  onScaleEnd: (_) {
+                    _dialAtStart = null;
+                    _shapeAtStart = null;
+                  },
                   child: Stack(fit: StackFit.expand, children: [
                     Image.memory(
                       _showOriginal || _shown == null
@@ -264,6 +341,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       CustomPaint(
                         painter: _OverlayPainter(
                           dial: _p.dial,
+                          shape: _p.shape,
                           showDial: _p.dialOn && _tab == _Tab.dial,
                           square: _p.square,
                           imgW: pv.width,
@@ -295,9 +373,11 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          _tab == _Tab.dial && _p.dialOn
-              ? 'Trascina il cerchio sul quadrante, pizzica per ridimensionarlo'
-              : 'Tieni premuto sulla foto per vedere l\'originale',
+          _tapMode
+              ? 'Tocca il centro del quadrante'
+              : _tab == _Tab.dial && _p.dialOn
+                  ? 'Trascina il contorno per spostarlo, pizzica per ridimensionarlo'
+                  : 'Tieni premuto sulla foto per vedere l\'originale',
           style: Theme.of(context).textTheme.bodySmall,
           textAlign: TextAlign.center,
         ),
@@ -326,11 +406,31 @@ class _EditorScreenState extends State<EditorScreen> {
     switch (_tab) {
       case _Tab.auto:
         return ListView(padding: const EdgeInsets.all(16), children: [
-          FilledButton.icon(
-            onPressed: () =>
-                _update(EnhanceParams.auto.withDial(_p.dial), now: true),
-            icon: const Icon(Icons.auto_awesome),
-            label: const Text('Migliora in un tocco'),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () =>
+                    _update(EnhanceParams.rich.keepDialOf(_p), now: true),
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Ricco'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: () =>
+                    _update(EnhanceParams.natural.keepDialOf(_p), now: true),
+                icon: const Icon(Icons.wb_sunny_outlined),
+                label: const Text('Naturale'),
+              ),
+            ),
+          ]),
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'Ricco: toni profondi, cinturino vivo, sfondo scuro pulito. '
+              'Naturale: più chiaro e delicato.',
+            ),
           ),
           const SizedBox(height: 8),
           _slider('Intensità', _p.intensity, 0, 1,
@@ -338,7 +438,7 @@ class _EditorScreenState extends State<EditorScreen> {
           const SizedBox(height: 4),
           OutlinedButton.icon(
             onPressed: () =>
-                _update(EnhanceParams.none.withDial(_p.dial), now: true),
+                _update(EnhanceParams.none.keepDialOf(_p), now: true),
             icon: const Icon(Icons.restart_alt),
             label: const Text('Nessun ritocco'),
           ),
@@ -352,6 +452,11 @@ class _EditorScreenState extends State<EditorScreen> {
         ]);
       case _Tab.light:
         return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+          _slider('Tono ricco', _p.look, 0, 1, (v) => _p.copyWith(look: v)),
+          _slider('Chiarezza', _p.clarity, 0, 1,
+              (v) => _p.copyWith(clarity: v)),
+          _slider('Vivacità', _p.vibrance, 0, 1,
+              (v) => _p.copyWith(vibrance: v)),
           _slider('Esposizione', _p.exposure, -1, 1,
               (v) => _p.copyWith(exposure: v)),
           _slider('Contrasto', _p.contrast, -1, 1,
@@ -370,9 +475,45 @@ class _EditorScreenState extends State<EditorScreen> {
         return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
           SwitchListTile(
             title: const Text('Ritocca il quadrante'),
+            subtitle: Text(_p.shape != null
+                ? 'Contorno trovato (forma libera)'
+                : 'Cerchio'),
             value: _p.dialOn,
             onChanged: (v) => _update(_p.copyWith(dialOn: v), now: true),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(spacing: 8, runSpacing: 4, children: [
+              FilledButton.tonalIcon(
+                onPressed: _p.dialOn
+                    ? () => setState(() {
+                          _tapMode = !_tapMode;
+                          _aiStatus = _tapMode ? null : _aiStatus;
+                        })
+                    : null,
+                icon: Icon(_tapMode ? Icons.close : Icons.touch_app_outlined),
+                label: Text(_tapMode ? 'Annulla' : 'Tocca il quadrante (IA)'),
+              ),
+              OutlinedButton(
+                onPressed: _p.dialOn ? _redetect : null,
+                child: const Text('Trova di nuovo'),
+              ),
+              if (_p.shape != null)
+                OutlinedButton(
+                  onPressed: () => _update(
+                      _p.copyWith(
+                          clearShape: true,
+                          dial: _circleAround(_p.shape!)),
+                      now: true),
+                  child: const Text('Usa cerchio'),
+                ),
+            ]),
+          ),
+          if (_aiStatus != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Text(_aiStatus!, style: Theme.of(context).textTheme.bodySmall),
+            ),
           _slider('Ammorbidisci segni', _p.smooth, 0, 1,
               (v) => _p.copyWith(smooth: v),
               enabled: _p.dialOn),
@@ -393,6 +534,8 @@ class _EditorScreenState extends State<EditorScreen> {
         ]);
       case _Tab.background:
         return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+          _slider('Pulisci sfondo scuro', _p.bgClean, 0, 1,
+              (v) => _p.copyWith(bgClean: v)),
           _slider('Sfondo bianco', _p.background, 0, 1,
               (v) => _p.copyWith(background: v)),
           Padding(
@@ -467,6 +610,7 @@ class _Badge extends StatelessWidget {
 
 class _OverlayPainter extends CustomPainter {
   final Dial dial;
+  final DialShape? shape;
   final bool showDial;
   final bool square;
   final int imgW, imgH;
@@ -474,6 +618,7 @@ class _OverlayPainter extends CustomPainter {
 
   _OverlayPainter({
     required this.dial,
+    required this.shape,
     required this.showDial,
     required this.square,
     required this.imgW,
@@ -486,8 +631,11 @@ class _OverlayPainter extends CustomPainter {
     if (square) {
       // stessa regola di cropSquare, in coordinate dello schermo
       final side = math.min(imgW, imgH);
-      final x0 = (dial.cx * imgW - side / 2).round().clamp(0, imgW - side);
-      final y0 = (dial.cy * imgH - side / 2).round().clamp(0, imgH - side);
+      final sh = shape;
+      final ccx = sh != null ? sh.centroid.x : dial.cx;
+      final ccy = sh != null ? sh.centroid.y : dial.cy;
+      final x0 = (ccx * imgW - side / 2).round().clamp(0, imgW - side);
+      final y0 = (ccy * imgH - side / 2).round().clamp(0, imgH - side);
       final sx = size.width / imgW, sy = size.height / imgH;
       final rect = Rect.fromLTWH(x0 * sx, y0 * sy, side * sx, side * sy);
       final dim = Path()
@@ -502,7 +650,31 @@ class _OverlayPainter extends CustomPainter {
             ..strokeWidth = 1.5
             ..color = Colors.white70);
     }
-    if (showDial) {
+    final sh = shape;
+    if (showDial && sh != null) {
+      final path = Path();
+      for (var i = 0; i < sh.length; i++) {
+        final o = Offset(sh.pts[2 * i] * size.width, sh.pts[2 * i + 1] * size.height);
+        if (i == 0) {
+          path.moveTo(o.dx, o.dy);
+        } else {
+          path.lineTo(o.dx, o.dy);
+        }
+      }
+      path.close();
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..color = Colors.black38);
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..color = color);
+    } else if (showDial) {
       final c = Offset(dial.cx * size.width, dial.cy * size.height);
       final r = dial.r * math.min(size.width, size.height);
       canvas.drawCircle(
@@ -526,6 +698,7 @@ class _OverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _OverlayPainter old) =>
       old.dial != dial ||
+      old.shape != shape ||
       old.showDial != showDial ||
       old.square != square ||
       old.color != color;
