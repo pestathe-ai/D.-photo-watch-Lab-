@@ -440,7 +440,13 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
     img.b[i] = (b * k).clamp(0.0, 1.0).toDouble();
   }
 
-  // 2. riduzione rumore (filtro guidato per canale)
+  // 1b. contorno del quadrante (serve già per rumore e anti-riflesso)
+  final mask = !p.dialOn
+      ? Float32List(n)
+      : (p.shape != null ? p.shape!.rasterize(w, h) : dialMask(w, h, p.dial));
+
+  // 2. riduzione rumore (filtro guidato per canale); più leggera sul
+  // quadrante per non ammorbidire tacche e scritte piccole
   if (p.denoise > 0) {
     final eps = math.pow(0.02 + 0.08 * p.denoise, 2).toDouble();
     final rr = s(3);
@@ -448,18 +454,14 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
     final ng = guidedSelf(img.g, w, h, rr, eps);
     final nb = guidedSelf(img.b, w, h, rr, eps);
     // a forza bassa mescola con l'originale
-    final k = math.min(1.0, p.denoise * 2);
+    final k0 = math.min(1.0, p.denoise * 2);
     for (var i = 0; i < n; i++) {
+      final k = k0 * (1 - 0.6 * mask[i]);
       img.r[i] += (nr[i] - img.r[i]) * k;
       img.g[i] += (ng[i] - img.g[i]) * k;
       img.b[i] += (nb[i] - img.b[i]) * k;
     }
   }
-
-  // 2b. contorno del quadrante (serve già qui per l'anti-riflesso forte)
-  final mask = !p.dialOn
-      ? Float32List(n)
-      : (p.shape != null ? p.shape!.rasterize(w, h) : dialMask(w, h, p.dial));
 
   // 2c. anti-riflesso forte (quadranti scuri): il riflesso del vetro è un
   // velo chiaro che si somma al quadrante. Si stima come "pavimento" della
@@ -476,7 +478,9 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
   final c = p.contrast;
   for (var i = 0; i < n; i++) {
     var v = lum[i];
-    if (p.look > 0) v += p.look * (_interp(v, _richY) - v);
+    // sul quadrante la curva è a metà: i bianchi restano bianchi e le
+    // scritte mantengono il contrasto
+    if (p.look > 0) v += p.look * (1 - 0.5 * mask[i]) * (_interp(v, _richY) - v);
     v *= expo;
     final sh = (1 - v / 0.5).clamp(0.0, 1.0);
     v += p.shadows * 0.5 * (1 - v) * sh * sh;
@@ -496,10 +500,12 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
         l2[i] = (l2[i] - v) / (1 - v);
       }
     }
+    // Scritte e indici: contrasto a scala fine (1-2 px). Rende più netti
+    // numeri, tacche e indici senza gonfiare macchie e aloni grandi.
     if (p.detail > 0) {
-      final base = guidedSelf(l2, w, h, s(16), 0.01);
+      final base = gaussBlur(l2, w, h, math.max(1, (1.5 * scale).round()));
       for (var i = 0; i < n; i++) {
-        l2[i] += p.detail * mask[i] * (l2[i] - base[i]);
+        l2[i] += 1.5 * p.detail * mask[i] * (l2[i] - base[i]);
       }
     }
   }
@@ -601,11 +607,11 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
   }
 
   // 6. nitidezza (sulla luminosità, con soglia per non alzare il rumore)
-  if (p.sharpen > 0 || (p.dialOn && p.detail > 0)) {
+  if (p.sharpen > 0) {
     final l = img.luminance();
     final bl = gaussBlur(l, w, h, s(1.5));
     for (var i = 0; i < n; i++) {
-      final amt = p.sharpen * 1.0 + p.detail * mask[i] * 0.8;
+      final amt = p.sharpen * 1.0;
       var hp = l[i] - bl[i];
       // soglia alta: rinforza solo i bordi veri, non la grana né i segni
       final mag = hp.abs() - 0.035;

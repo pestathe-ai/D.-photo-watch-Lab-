@@ -210,7 +210,9 @@ void main() {
       final src = synthetic();
       before = Planes.fromRgb(src);
       out = enhance(src, analyze(before),
-          EnhanceParams.natural.copyWith(background: 0.6, intensity: 1).withDial(dial));
+          EnhanceParams.natural
+              .copyWith(background: 0.6, intensity: 1, dust: 0.6, detail: 0)
+              .withDial(dial));
     });
 
     test('toglie i puntini di polvere dal quadrante', () {
@@ -485,6 +487,42 @@ void main() {
     expect(lumAt(out, 445, 335), lessThan(lumAt(out, 330, 300) - 0.03));
     // fuori dal quadrante non cambia niente
     expect(lumAt(out, 20, 20), closeTo(lumAt(before, 20, 20), 0.01));
+  });
+
+  test('lo stile ricco non cancella tacche e puntini stampati', () {
+    // quadrante bianco con tacche sottili e puntini (come la data di un
+    // cronografo): devono restare, anzi essere più netti
+    final rnd = math.Random(9);
+    final rgb = Uint8List(W * H * 3);
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        final d = math.sqrt((x - 400.0) * (x - 400) + (y - 300.0) * (y - 300));
+        var v = d < 200 ? 0.88 : (d < 230 ? 0.6 : 0.4);
+        if (d < 200 && y >= 150 && y < 162 && x % 12 == 0) v = 0.2; // tacche 1px
+        if (d < 200 && y >= 299 && y < 302 && (x - 300) % 20 < 3 && x < 500) {
+          v = 0.25; // puntini 3x3
+        }
+        v += (rnd.nextDouble() - 0.5) * 0.03;
+        final i = (y * W + x) * 3;
+        rgb[i] = rgb[i + 1] = rgb[i + 2] = _c(v);
+      }
+    }
+    final src = RgbImage(W, H, rgb);
+    final sh = findDialShape(src);
+    final p = sh != null
+        ? EnhanceParams.rich.copyWith(shape: sh)
+        : EnhanceParams.rich.withDial(const Dial(r: 200 / 600));
+    final out = enhance(src, Analysis.neutral, p);
+    final before = Planes.fromRgb(src);
+    double contrast(Planes q, int x, int y, int bx, int by) => lumAt(q, bx, by) - lumAt(q, x, y);
+    // tacca a x=396, fondo a x=402
+    expect(contrast(out, 396, 156, 402, 156),
+        greaterThan(contrast(before, 396, 156, 402, 156) * 0.9));
+    // puntino a x=321, fondo a x=330
+    expect(contrast(out, 321, 300, 330, 300),
+        greaterThan(contrast(before, 321, 300, 330, 300) * 0.9));
+    // il bianco del quadrante resta chiaro
+    expect(lumAt(out, 450, 400), greaterThan(0.8));
   });
 
   test('ritaglio quadrato centrato sul quadrante', () {

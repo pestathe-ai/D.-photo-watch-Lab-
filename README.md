@@ -3,6 +3,14 @@
 App Android che migliora le foto degli orologi da mettere in vendita.
 Tutto avviene **sul telefono**: nessun caricamento, nessuna chiave, funziona anche offline.
 
+## Novità v0.6
+- **Scritte e indici più netti**: il ritocco del quadrante ora rinforza i dettagli fini
+  (numeri, tacche, indici) invece di ammorbidirli. Prima "Togli polvere" scambiava
+  i puntini della data e le tacche dei minuti per polvere e li cancellava.
+- "Togli polvere" e "Ammorbidisci segni" ora partono da zero (da usare solo se servono).
+- Sul quadrante la curva "ricca" e la riduzione del rumore sono più leggere: i bianchi
+  restano bianchi.
+
 ## Novità v0.5
 - **Anti-riflesso forte** (scheda Quadrante): toglie il velo chiaro che il riflesso del
   cielo o di una finestra stende sui quadranti scuri. Parte da zero e si regola a mano

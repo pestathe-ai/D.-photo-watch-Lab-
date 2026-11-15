@@ -514,8 +514,8 @@ class _EditorScreenState extends State<EditorScreen> {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
               child: Text(_aiStatus!, style: Theme.of(context).textTheme.bodySmall),
             ),
-          _slider('Ammorbidisci segni', _p.smooth, 0, 1,
-              (v) => _p.copyWith(smooth: v),
+          _slider('Scritte e indici', _p.detail, 0, 1,
+              (v) => _p.copyWith(detail: v),
               enabled: _p.dialOn),
           _slider('Anti-riflesso forte', _p.deglare, 0, 1,
               (v) => _p.copyWith(deglare: v),
@@ -533,13 +533,15 @@ class _EditorScreenState extends State<EditorScreen> {
               enabled: _p.dialOn),
           _slider('Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),
               enabled: _p.dialOn),
-          _slider('Dettaglio', _p.detail, 0, 1, (v) => _p.copyWith(detail: v),
+          _slider('Ammorbidisci segni', _p.smooth, 0, 1,
+              (v) => _p.copyWith(smooth: v),
               enabled: _p.dialOn),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Dettaglio rende più incisi indici e scritte, ma mostra anche i '
-              'difetti: usalo poco.',
+              'Togli polvere e Ammorbidisci segni partono da zero: su quadranti '
+              'con puntini stampati, tacche fini o scritte piccole possono '
+              'cancellarli. Usali solo se servono e controlla con lo zoom.',
             ),
           ),
         ]);

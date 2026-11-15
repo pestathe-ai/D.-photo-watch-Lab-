@@ -109,9 +109,8 @@ class EnhanceParams {
     denoise: 0.25,
     sharpen: 0.5,
     dialOn: true,
+    detail: 0.4,
     glare: 0.25,
-    dust: 0.5,
-    smooth: 0.35,
     bgClean: 0.8,
   );
 
@@ -125,9 +124,8 @@ class EnhanceParams {
     denoise: 0.4,
     sharpen: 0.2,
     dialOn: true,
+    detail: 0.25,
     glare: 0.35,
-    dust: 0.5,
-    smooth: 0.5,
     bgClean: 0.4,
     intensity: 0.8,
   );
