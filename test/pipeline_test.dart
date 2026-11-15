@@ -452,6 +452,41 @@ void main() {
     });
   });
 
+  test('anti-riflesso forte: toglie il velo, tiene indici e macchie', () {
+    // quadrante scuro coperto da un riflesso chiaro (cielo) uniforme
+    final src = synthetic();
+    final m = Uint8List(W * H);
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        final d = math.sqrt((x - 400) * (x - 400) + (y - 300) * (y - 300));
+        if (d < 180) {
+          for (var c = 0; c < 3; c++) {
+            final i = (y * W + x) * 3 + c;
+            src.rgb[i] = (src.rgb[i] * 0.55 + 255 * 0.45).round();
+          }
+        }
+      }
+    }
+    // una "macchia" vera sul quadrante, più scura del fondo
+    for (var y = 330; y < 340; y++) {
+      for (var x = 440; x < 450; x++) {
+        for (var c = 0; c < 3; c++) {
+          src.rgb[(y * W + x) * 3 + c] = (src.rgb[(y * W + x) * 3 + c] * 0.7).round();
+        }
+      }
+    }
+    final base = EnhanceParams.none.copyWith(dialOn: true, dial: dial);
+    final before = enhance(src, Analysis.neutral, base);
+    final out = enhance(src, Analysis.neutral, base.copyWith(deglare: 1));
+    expect(lumAt(before, 300, 300), greaterThan(0.45)); // velato
+    expect(lumAt(out, 300, 300), lessThan(0.3)); // di nuovo scuro
+    expect(lumAt(out, 400, 150), greaterThan(0.6)); // indice delle 12 chiaro
+    // la macchia resta visibile
+    expect(lumAt(out, 445, 335), lessThan(lumAt(out, 330, 300) - 0.03));
+    // fuori dal quadrante non cambia niente
+    expect(lumAt(out, 20, 20), closeTo(lumAt(before, 20, 20), 0.01));
+  });
+
   test('ritaglio quadrato centrato sul quadrante', () {
     final out = enhance(synthetic(dust: false), Analysis.neutral,
         EnhanceParams.none.copyWith(square: true, dialOn: true, dial: dial));

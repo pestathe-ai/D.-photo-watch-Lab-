@@ -517,7 +517,18 @@ class _EditorScreenState extends State<EditorScreen> {
           _slider('Ammorbidisci segni', _p.smooth, 0, 1,
               (v) => _p.copyWith(smooth: v),
               enabled: _p.dialOn),
-          _slider('Anti-riflesso vetro', _p.glare, 0, 1,
+          _slider('Anti-riflesso forte', _p.deglare, 0, 1,
+              (v) => _p.copyWith(deglare: v),
+              enabled: _p.dialOn),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Anti-riflesso forte: per quadranti scuri velati dal riflesso del '
+              'cielo o di una finestra. Su quadranti chiari lasciarlo a zero. '
+              'Le macchie vere del quadrante restano visibili.',
+            ),
+          ),
+          _slider('Anti-riflesso leggero', _p.glare, 0, 1,
               (v) => _p.copyWith(glare: v),
               enabled: _p.dialOn),
           _slider('Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),

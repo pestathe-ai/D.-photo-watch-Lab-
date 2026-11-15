@@ -221,7 +221,8 @@ Float32List dialMask(int w, int h, Dial d, {double feather = 0.08}) {
 /// Velo del riflesso: il "pavimento" della luminosità (minimo locale a
 /// bassa frequenza) sopra il livello scuro del quadrante. I dettagli
 /// chiari (indici, lancette) non lo alzano, quindi non vengono spenti.
-Float32List veilMap(Float32List lum, Float32List mask, int w, int h) {
+Float32List veilMap(Float32List lum, Float32List mask, int w, int h,
+    {bool raw = false}) {
   final f = math.max(1, math.max(w, h) ~/ 256);
   final sw = (w + f - 1) ~/ f, sh = (h + f - 1) ~/ f;
   final small = Float32List(sw * sh);
@@ -264,7 +265,8 @@ Float32List veilMap(Float32List lum, Float32List mask, int w, int h) {
       break;
     }
   }
-  final floor = percentile(blurred, 10, weightMask: anyInside ? sm : null);
+  final floor =
+      raw ? 0.0 : percentile(blurred, 10, weightMask: anyInside ? sm : null);
   // ingrandimento bilineare alla misura piena
   final out = Float32List(w * h);
   for (var y = 0; y < h; y++) {
@@ -358,6 +360,51 @@ int removeDust(Planes p, Float32List mask, double strength, double scale) {
 // ---------------------------------------------------------------------------
 // Ritocco completo
 
+/// Toglie il velo del riflesso dal quadrante. [strength] 0..1: a 1 il
+/// "pavimento" della luminosità arriva a circa 0.12 (grigio scuro).
+void deglare(Planes img, Float32List mask, double strength) {
+  final w = img.w, h = img.h, n = w * h;
+  final lum = img.luminance();
+  final env = veilMap(lum, mask, w, h, raw: true);
+  // soglia del 70% del pavimento dentro il quadrante
+  var cnt = 0;
+  for (var i = 0; i < n; i++) {
+    if (mask[i] > 0.5) cnt++;
+  }
+  if (cnt < 50) return;
+  final p70 = percentile(env, 70, weightMask: mask);
+  // colore del riflesso (cielo, finestra...): media dove il velo è più forte
+  double ar = 0, ag = 0, ab = 0;
+  var k = 0;
+  for (var i = 0; i < n; i++) {
+    if (mask[i] > 0.5 && env[i] >= p70) {
+      ar += img.r[i];
+      ag += img.g[i];
+      ab += img.b[i];
+      k++;
+    }
+  }
+  if (k == 0) return;
+  ar /= k;
+  ag /= k;
+  ab /= k;
+  final al = math.max(1e-3, 0.299 * ar + 0.587 * ag + 0.114 * ab);
+  ar /= al;
+  ag /= al;
+  ab /= al;
+  const target = 0.12;
+  for (var i = 0; i < n; i++) {
+    final m = mask[i];
+    if (m <= 0) continue;
+    final v = strength * ((env[i] - target) / (1 - target)).clamp(0.0, 0.8) * m;
+    if (v <= 0) continue;
+    final d = 1 - v;
+    img.r[i] = ((img.r[i] - v * ar) / d).clamp(0.0, 1.0).toDouble();
+    img.g[i] = ((img.g[i] - v * ag) / d).clamp(0.0, 1.0).toDouble();
+    img.b[i] = ((img.b[i] - v * ab) / d).clamp(0.0, 1.0).toDouble();
+  }
+}
+
 /// Applica tutto il ritocco. Le dimensioni dei filtri sono pensate per una
 /// foto con lato lungo di 2048 px e scalate sulla misura reale, così
 /// l'anteprima piccola somiglia al risultato salvato.
@@ -409,6 +456,19 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
     }
   }
 
+  // 2b. contorno del quadrante (serve già qui per l'anti-riflesso forte)
+  final mask = !p.dialOn
+      ? Float32List(n)
+      : (p.shape != null ? p.shape!.rasterize(w, h) : dialMask(w, h, p.dial));
+
+  // 2c. anti-riflesso forte (quadranti scuri): il riflesso del vetro è un
+  // velo chiaro che si somma al quadrante. Si stima come "pavimento" della
+  // luminosità a bassa frequenza e si toglie, portandolo verso un grigio
+  // scuro. Le macchie vere del quadrante restano (anzi si vedono meglio).
+  if (p.dialOn && p.deglare > 0) {
+    deglare(img, mask, p.deglare);
+  }
+
   // 3. toni sulla luminosità
   final lum = img.luminance();
   final l2 = Float32List(n);
@@ -427,10 +487,7 @@ Planes enhance(RgbImage src, Analysis an, EnhanceParams params,
     l2[i] = v;
   }
 
-  // 4. quadrante: riflesso e chiarezza
-  final mask = !p.dialOn
-      ? Float32List(n)
-      : (p.shape != null ? p.shape!.rasterize(w, h) : dialMask(w, h, p.dial));
+  // 4. quadrante: riflesso leggero e chiarezza
   if (p.dialOn && (p.glare > 0 || p.detail > 0)) {
     if (p.glare > 0) {
       final veil = veilMap(l2, mask, w, h);

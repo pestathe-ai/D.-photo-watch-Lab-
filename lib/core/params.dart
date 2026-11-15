@@ -57,6 +57,7 @@ class EnhanceParams {
   final DialShape? shape; // contorno di qualsiasi forma
   final double detail; // 0..1 chiarezza locale
   final double glare; // 0..1 riduce il velo di riflesso sul vetro
+  final double deglare; // 0..1 anti-riflesso forte (quadranti scuri)
   final double dust; // 0..1 toglie puntini di polvere
   final double smooth; // 0..1 ammorbidisce micro-segni e graffietti
 
@@ -85,6 +86,7 @@ class EnhanceParams {
     this.shape,
     this.detail = 0,
     this.glare = 0,
+    this.deglare = 0,
     this.dust = 0,
     this.smooth = 0,
     this.bgClean = 0,
@@ -151,6 +153,7 @@ class EnhanceParams {
     bool clearShape = false,
     double? detail,
     double? glare,
+    double? deglare,
     double? dust,
     double? smooth,
     double? bgClean,
@@ -175,6 +178,7 @@ class EnhanceParams {
         shape: clearShape ? null : (shape ?? this.shape),
         detail: detail ?? this.detail,
         glare: glare ?? this.glare,
+        deglare: deglare ?? this.deglare,
         dust: dust ?? this.dust,
         smooth: smooth ?? this.smooth,
         bgClean: bgClean ?? this.bgClean,
@@ -211,6 +215,7 @@ class EnhanceParams {
       vibrance: vibrance * k,
       detail: detail * k,
       glare: glare * k,
+      deglare: deglare * k,
       dust: dust * k,
       smooth: smooth * k,
       bgClean: bgClean * k,
