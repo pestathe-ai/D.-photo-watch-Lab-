@@ -17,3 +17,7 @@ ios/
 .vscode/
 *.iml
 .DS_Store
+
+# codice Android nativo da copiare nel progetto generato
+!tool/android/
+!tool/android/**
