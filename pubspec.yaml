@@ -1,7 +1,7 @@
 name: d_photo_watch_lab
 description: "D. Photo Watch Lab - migliora le foto degli orologi da vendere, tutto sul telefono."
 publish_to: 'none'
-version: 0.6.1+7
+version: 0.7.0+8
 
 environment:
   sdk: ^3.5.0
@@ -24,6 +24,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Sora
+      fonts:
+        - asset: assets/fonts/Sora-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Sora-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Sora-ExtraBold.ttf
+          weight: 800
 
 flutter_launcher_icons:
   android: true

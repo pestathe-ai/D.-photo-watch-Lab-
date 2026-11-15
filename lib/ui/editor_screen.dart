@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import '../core/pipeline.dart';
 import '../core/shape.dart';
 import '../services/cutout.dart';
 import '../services/magic_touch.dart';
+import 'theme.dart';
 
 /// Lavoro da mandare a un isolate: solo dati semplici.
 class RenderJob {
@@ -250,48 +252,102 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Ritocco'),
-        actions: widget.batchMode
-            ? [
-                TextButton.icon(
-                  onPressed: () => Navigator.of(context).pop(_p),
-                  icon: const Icon(Icons.check),
-                  label: const Text('Fatto'),
+    return Theme(
+      data: buildEditorTheme(),
+      child: Builder(builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Ritocco'),
+            actions: widget.batchMode
+                ? [
+                    Padding(
+                      padding: const EdgeInsets.only(right: Space.s),
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.of(context).pop(_p),
+                        icon: const Icon(Icons.check),
+                        label: const Text('Fatto'),
+                      ),
+                    ),
+                  ]
+                : [
+                    IconButton(
+                      tooltip: 'Condividi',
+                      onPressed: _exporting ? null : _share,
+                      icon: const Icon(Icons.share_outlined),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: Space.s),
+                      child: FilledButton.icon(
+                        onPressed: _exporting ? null : _save,
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Salva'),
+                      ),
+                    ),
+                  ],
+          ),
+          body: SafeArea(
+            bottom: false,
+            child: LayoutBuilder(builder: (ctx2, c) {
+              // il pannello si adatta all'altezza (e al testo grande)
+              final panelH = (c.maxHeight * 0.4).clamp(200.0, 360.0);
+              return Column(children: [
+                Expanded(child: _previewArea(ctx)),
+                if (_exporting) const LinearProgressIndicator(minHeight: 2),
+                Material(
+                  color: cs.surface,
+                  child: SizedBox(height: panelH, child: _controls(ctx)),
                 ),
-              ]
-            : [
-          IconButton(
-            tooltip: 'Condividi',
-            onPressed: _exporting ? null : _share,
-            icon: const Icon(Icons.share_outlined),
+              ]);
+            }),
           ),
-          IconButton(
-            tooltip: 'Salva in galleria',
-            onPressed: _exporting ? null : _save,
-            icon: const Icon(Icons.download_outlined),
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _tab.index,
+            onDestinationSelected: (i) => setState(() {
+              _tab = _Tab.values[i];
+              if (_tab != _Tab.dial) _tapMode = false;
+            }),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.auto_awesome_outlined),
+                selectedIcon: Icon(Icons.auto_awesome),
+                label: 'Auto',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.tune_outlined),
+                selectedIcon: Icon(Icons.tune),
+                label: 'Luce',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.watch_outlined),
+                selectedIcon: Icon(Icons.watch),
+                label: 'Quadrante',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.wallpaper_outlined),
+                selectedIcon: Icon(Icons.wallpaper),
+                label: 'Sfondo',
+              ),
+            ],
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(children: [
-          Expanded(child: _previewArea()),
-          if (_exporting) const LinearProgressIndicator(),
-          _tabs(),
-          SizedBox(height: 236, child: _controls()),
-        ]),
-      ),
+        );
+      }),
     );
   }
 
-  Widget _previewArea() {
+  Widget _previewArea(BuildContext ctx) {
     final pv = widget.photo.preview;
-    final cs = Theme.of(context).colorScheme;
+    final cs = Theme.of(ctx).colorScheme;
+    final t = Theme.of(ctx).textTheme;
+    final hint = _tapMode
+        ? 'Tocca il centro del quadrante'
+        : _tab == _Tab.dial && _p.dialOn
+            ? 'Trascina il contorno per spostarlo, pizzica per ridimensionarlo'
+            : null;
     return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Column(children: [
-        Expanded(
+      padding: const EdgeInsets.fromLTRB(Space.s, Space.xs, Space.s, Space.s),
+      child: Stack(children: [
+        Positioned.fill(
           child: Center(
             child: AspectRatio(
               aspectRatio: pv.width / pv.height,
@@ -333,161 +389,196 @@ class _EditorScreenState extends State<EditorScreen> {
                     _dialAtStart = null;
                     _shapeAtStart = null;
                   },
-                  child: Stack(fit: StackFit.expand, children: [
-                    Image.memory(
-                      _showOriginal || _shown == null
-                          ? widget.photo.previewJpeg
-                          : _shown!,
-                      fit: BoxFit.fill,
-                      gaplessPlayback: true,
-                    ),
-                    if (!_showOriginal)
-                      CustomPaint(
-                        painter: _OverlayPainter(
-                          dial: _p.dial,
-                          shape: _p.shape,
-                          showDial: _p.dialOn && _tab == _Tab.dial,
-                          square: _p.square,
-                          imgW: pv.width,
-                          imgH: pv.height,
-                          color: cs.secondary,
+                  child: Semantics(
+                    image: true,
+                    label: _showOriginal ? 'Foto originale' : 'Anteprima della foto ritoccata',
+                    child: Stack(fit: StackFit.expand, children: [
+                      Image.memory(
+                        _showOriginal || _shown == null
+                            ? widget.photo.previewJpeg
+                            : _shown!,
+                        fit: BoxFit.fill,
+                        gaplessPlayback: true,
+                      ),
+                      if (!_showOriginal)
+                        CustomPaint(
+                          painter: _OverlayPainter(
+                            dial: _p.dial,
+                            shape: _p.shape,
+                            showDial: _p.dialOn && _tab == _Tab.dial,
+                            square: _p.square,
+                            imgW: pv.width,
+                            imgH: pv.height,
+                            color: cs.secondary,
+                          ),
                         ),
-                      ),
-                    if (_showOriginal)
-                      const Positioned(
-                        left: 8,
-                        top: 8,
-                        child: _Badge('Originale'),
-                      ),
-                    if (_rendering)
-                      const Positioned(
-                        right: 8,
-                        top: 8,
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                  ]),
+                    ]),
+                  ),
                 );
               }),
             ),
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          _tapMode
-              ? 'Tocca il centro del quadrante'
-              : _tab == _Tab.dial && _p.dialOn
-                  ? 'Trascina il contorno per spostarlo, pizzica per ridimensionarlo'
-                  : 'Tieni premuto sulla foto per vedere l\'originale',
-          style: Theme.of(context).textTheme.bodySmall,
-          textAlign: TextAlign.center,
+        // confronto prima/dopo: pulsante visibile (oltre alla pressione lunga)
+        Positioned(
+          left: Space.s,
+          bottom: Space.s,
+          child: _HoldButton(
+            label: _showOriginal ? 'Originale' : 'Prima',
+            onHold: (v) => setState(() => _showOriginal = v),
+          ),
         ),
+        Positioned(
+          right: Space.m,
+          top: Space.m,
+          child: AnimatedOpacity(
+            opacity: _rendering ? 1 : 0,
+            duration: Motion.fast,
+            child: const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+        if (hint != null)
+          Positioned(
+            left: Space.xl * 4,
+            right: Space.s,
+            bottom: Space.s,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: Space.m, vertical: Space.s),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(hint,
+                    style: t.bodySmall?.copyWith(color: Colors.white),
+                    textAlign: TextAlign.right),
+              ),
+            ),
+          ),
       ]),
     );
   }
 
-  Widget _tabs() {
+  Widget _section(BuildContext ctx, String title) {
+    final t = Theme.of(ctx).textTheme;
+    final cs = Theme.of(ctx).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: SegmentedButton<_Tab>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: _Tab.auto, label: Text('Auto')),
-          ButtonSegment(value: _Tab.light, label: Text('Luce')),
-          ButtonSegment(value: _Tab.dial, label: Text('Quadrante')),
-          ButtonSegment(value: _Tab.background, label: Text('Sfondo')),
-        ],
-        selected: {_tab},
-        onSelectionChanged: (s) => setState(() => _tab = s.first),
+      padding: const EdgeInsets.fromLTRB(Space.l, Space.l, Space.l, Space.xs),
+      child: Semantics(
+        header: true,
+        child: Text(title,
+            style: t.labelLarge?.copyWith(
+                color: cs.onSurfaceVariant, letterSpacing: 0.4)),
       ),
     );
   }
 
-  Widget _controls() {
+  Widget _help(BuildContext ctx, String text) {
+    final t = Theme.of(ctx).textTheme;
+    final cs = Theme.of(ctx).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.l, Space.xs, Space.l, Space.s),
+      child: Text(text, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+    );
+  }
+
+  Widget _controls(BuildContext ctx) {
+    const pad = EdgeInsets.only(bottom: Space.l);
     switch (_tab) {
       case _Tab.auto:
-        return ListView(padding: const EdgeInsets.all(16), children: [
-          Row(children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () =>
-                    _update(EnhanceParams.rich.keepDialOf(_p), now: true),
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Ricco'),
+        return ListView(padding: pad, children: [
+          _section(ctx, 'Stile'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.l),
+            child: Row(children: [
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () =>
+                      _update(EnhanceParams.rich.keepDialOf(_p), now: true),
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Ricco'),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.tonalIcon(
-                onPressed: () =>
-                    _update(EnhanceParams.natural.keepDialOf(_p), now: true),
-                icon: const Icon(Icons.wb_sunny_outlined),
-                label: const Text('Naturale'),
+              const SizedBox(width: Space.s),
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () =>
+                      _update(EnhanceParams.natural.keepDialOf(_p), now: true),
+                  icon: const Icon(Icons.wb_sunny_outlined),
+                  label: const Text('Naturale'),
+                ),
               ),
-            ),
-          ]),
-          const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text(
-              'Ricco: toni profondi, cinturino vivo, sfondo scuro pulito. '
-              'Naturale: più chiaro e delicato.',
-            ),
+            ]),
           ),
-          const SizedBox(height: 8),
-          _slider('Intensità', _p.intensity, 0, 1,
-              (v) => _p.copyWith(intensity: v)),
-          const SizedBox(height: 4),
-          OutlinedButton.icon(
-            onPressed: () =>
-                _update(EnhanceParams.none.keepDialOf(_p), now: true),
-            icon: const Icon(Icons.restart_alt),
-            label: const Text('Nessun ritocco'),
-          ),
+          _help(ctx, 'Ricco: toni profondi, cinturino vivo, sfondo scuro pulito. '
+              'Naturale: più chiaro e delicato.'),
+          _slider(ctx, 'Intensità', _p.intensity, 0, 1,
+              (v) => _p.copyWith(intensity: v),
+              reset: 1),
           SwitchListTile(
-            contentPadding: EdgeInsets.zero,
             title: const Text('Colore e livelli automatici'),
-            subtitle: const Text('Toglie la dominante gialla/blu e usa tutta la gamma'),
+            subtitle: const Text('Toglie la dominante gialla o blu'),
             value: _p.autoColor,
             onChanged: (v) => _update(_p.copyWith(autoColor: v), now: true),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.s),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    _update(EnhanceParams.none.keepDialOf(_p), now: true),
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Nessun ritocco'),
+              ),
+            ),
+          ),
         ]);
       case _Tab.light:
-        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
-          _slider('Tono ricco', _p.look, 0, 1, (v) => _p.copyWith(look: v)),
-          _slider('Chiarezza', _p.clarity, 0, 1,
+        return ListView(padding: pad, children: [
+          _help(ctx, 'Doppio tocco sul nome di un cursore per azzerarlo.'),
+          _section(ctx, 'Stile'),
+          _slider(ctx, 'Tono ricco', _p.look, 0, 1, (v) => _p.copyWith(look: v)),
+          _slider(ctx, 'Chiarezza', _p.clarity, 0, 1,
               (v) => _p.copyWith(clarity: v)),
-          _slider('Vivacità', _p.vibrance, 0, 1,
+          _slider(ctx, 'Vivacità', _p.vibrance, 0, 1,
               (v) => _p.copyWith(vibrance: v)),
-          _slider('Esposizione', _p.exposure, -1, 1,
+          _section(ctx, 'Luce'),
+          _slider(ctx, 'Esposizione', _p.exposure, -1, 1,
               (v) => _p.copyWith(exposure: v)),
-          _slider('Contrasto', _p.contrast, -1, 1,
+          _slider(ctx, 'Contrasto', _p.contrast, -1, 1,
               (v) => _p.copyWith(contrast: v)),
-          _slider('Calore', _p.warmth, -1, 1, (v) => _p.copyWith(warmth: v)),
-          _slider('Schiarisci ombre', _p.shadows, 0, 1,
+          _slider(ctx, 'Calore', _p.warmth, -1, 1, (v) => _p.copyWith(warmth: v)),
+          _slider(ctx, 'Schiarisci ombre', _p.shadows, 0, 1,
               (v) => _p.copyWith(shadows: v)),
-          _slider('Recupera luci', _p.highlights, 0, 1,
+          _slider(ctx, 'Recupera luci', _p.highlights, 0, 1,
               (v) => _p.copyWith(highlights: v)),
-          _slider('Riduci rumore', _p.denoise, 0, 1,
+          _section(ctx, 'Qualità'),
+          _slider(ctx, 'Riduci rumore', _p.denoise, 0, 1,
               (v) => _p.copyWith(denoise: v)),
-          _slider('Nitidezza', _p.sharpen, 0, 1,
+          _slider(ctx, 'Nitidezza', _p.sharpen, 0, 1,
               (v) => _p.copyWith(sharpen: v)),
         ]);
       case _Tab.dial:
-        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
+        return ListView(padding: pad, children: [
           SwitchListTile(
             title: const Text('Ritocca il quadrante'),
             subtitle: Text(_p.shape != null
                 ? 'Contorno trovato (forma libera)'
-                : 'Cerchio'),
+                : 'Contorno a cerchio'),
             value: _p.dialOn,
             onChanged: (v) => _update(_p.copyWith(dialOn: v), now: true),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(spacing: 8, runSpacing: 4, children: [
+            padding: const EdgeInsets.symmetric(horizontal: Space.l),
+            child: Wrap(spacing: Space.s, runSpacing: Space.s, children: [
               FilledButton.tonalIcon(
                 onPressed: _p.dialOn
                     ? () => setState(() {
@@ -514,60 +605,45 @@ class _EditorScreenState extends State<EditorScreen> {
             ]),
           ),
           if (_aiStatus != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-              child: Text(_aiStatus!, style: Theme.of(context).textTheme.bodySmall),
-            ),
-          _slider('Scritte e indici', _p.detail, 0, 1,
+            Semantics(liveRegion: true, child: _help(ctx, _aiStatus!)),
+          _section(ctx, 'Migliora'),
+          _slider(ctx, 'Scritte e indici', _p.detail, 0, 1,
               (v) => _p.copyWith(detail: v),
               enabled: _p.dialOn),
-          _slider('Anti-riflesso forte', _p.deglare, 0, 1,
+          _slider(ctx, 'Anti-riflesso forte', _p.deglare, 0, 1,
               (v) => _p.copyWith(deglare: v),
               enabled: _p.dialOn),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Anti-riflesso forte: per quadranti scuri velati dal riflesso del '
-              'cielo o di una finestra. Su quadranti chiari lasciarlo a zero. '
-              'Le macchie vere del quadrante restano visibili.',
-            ),
-          ),
-          _slider('Anti-riflesso leggero', _p.glare, 0, 1,
+          _help(ctx, 'Per quadranti scuri velati da cielo o finestra; sui '
+              'quadranti chiari lascialo a zero.'),
+          _slider(ctx, 'Anti-riflesso leggero', _p.glare, 0, 1,
               (v) => _p.copyWith(glare: v),
               enabled: _p.dialOn),
-          _slider('Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),
+          _section(ctx, 'Pulizia, con cautela'),
+          _slider(ctx, 'Togli polvere', _p.dust, 0, 1, (v) => _p.copyWith(dust: v),
               enabled: _p.dialOn),
-          _slider('Ammorbidisci segni', _p.smooth, 0, 1,
+          _slider(ctx, 'Ammorbidisci segni', _p.smooth, 0, 1,
               (v) => _p.copyWith(smooth: v),
               enabled: _p.dialOn),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Togli polvere e Ammorbidisci segni partono da zero: su quadranti '
-              'con puntini stampati, tacche fini o scritte piccole possono '
-              'cancellarli. Usali solo se servono e controlla con lo zoom.',
-            ),
-          ),
+          _help(ctx, 'Possono cancellare puntini stampati, tacche fini e '
+              'scritte piccole: usali solo se servono e controlla con "Prima".'),
         ]);
       case _Tab.background:
-        return ListView(padding: const EdgeInsets.symmetric(vertical: 4), children: [
-          _slider('Pulisci sfondo scuro', _p.bgClean, 0, 1,
+        return ListView(padding: pad, children: [
+          _section(ctx, 'Sfondo'),
+          _slider(ctx, 'Pulisci sfondo scuro', _p.bgClean, 0, 1,
               (v) => _p.copyWith(bgClean: v)),
-          _slider('Sfondo bianco', _p.background, 0, 1,
+          _slider(ctx, 'Sfondo bianco', _p.background, 0, 1,
               (v) => _p.copyWith(background: v)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
+          _help(
+              ctx,
               widget.photo.subject != null
-                  ? 'Scontorno IA attivo: schiarisce solo lo sfondo, lascia '
-                      'l\'orologio com\'è e tiene un filo d\'ombra naturale.'
-                  : 'Scontorno IA: $_cutoutState. Senza IA funziona solo su '
-                      'sfondi già chiari (foglio bianco o grigio).',
-            ),
-          ),
+                  ? 'Scontorno IA attivo: cambia solo lo sfondo, l\'orologio resta com\'è.'
+                  : 'Scontorno IA: $_cutoutState. Senza IA lo sfondo bianco '
+                      'funziona solo su sfondi già chiari.'),
+          _section(ctx, 'Formato'),
           SwitchListTile(
             title: const Text('Ritaglio quadrato 1:1'),
-            subtitle: const Text('Centrato sul quadrante, ideale per annunci e Instagram'),
+            subtitle: const Text('Centrato sul quadrante, per annunci e Instagram'),
             value: _p.square,
             onChanged: (v) => setState(() => _p = _p.copyWith(square: v)),
           ),
@@ -575,34 +651,41 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  Widget _slider(String label, double value, double min, double max,
-      EnhanceParams Function(double) apply,
-      {bool enabled = true}) {
+  /// Cursore: nome e valore su una riga, cursore a tutta larghezza sotto.
+  /// Doppio tocco sul nome = valore di partenza ([reset]).
+  Widget _slider(BuildContext ctx, String label, double value, double min,
+      double max, EnhanceParams Function(double) apply,
+      {bool enabled = true, double reset = 0}) {
+    final t = Theme.of(ctx).textTheme;
+    final cs = Theme.of(ctx).colorScheme;
+    final shown = (value * 100).round();
+    final valueText = min < 0 && shown > 0 ? '+$shown' : '$shown';
+    final fg = enabled ? cs.onSurface : cs.onSurface.withValues(alpha: 0.38);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(children: [
-        SizedBox(
-          width: 128,
-          child: Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: enabled ? null : Theme.of(context).disabledColor)),
+      padding: const EdgeInsets.fromLTRB(Space.l, Space.s, Space.l, 0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTap: enabled ? () => _update(apply(reset), now: true) : null,
+          child: ExcludeSemantics(
+            child: Row(children: [
+              Expanded(child: Text(label, style: t.bodyMedium?.copyWith(color: fg))),
+              Text(valueText,
+                  style: t.labelLarge?.copyWith(
+                    color: enabled ? cs.primary : fg,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+            ]),
+          ),
         ),
-        Expanded(
+        Semantics(
+          label: label,
           child: Slider(
             value: value.clamp(min, max).toDouble(),
             min: min,
             max: max,
+            semanticFormatterCallback: (v) => valueText,
             onChanged: enabled ? (v) => _update(apply(v)) : null,
-          ),
-        ),
-        SizedBox(
-          width: 34,
-          child: Text(
-            (value * 100).round().toString(),
-            textAlign: TextAlign.right,
-            style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
       ]),
@@ -610,19 +693,62 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 }
 
-class _Badge extends StatelessWidget {
-  final String text;
-  const _Badge(this.text);
+/// Pulsante "tieni premuto per vedere l'originale".
+class _HoldButton extends StatefulWidget {
+  final String label;
+  final ValueChanged<bool> onHold;
+  const _HoldButton({required this.label, required this.onHold});
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(6),
+  State<_HoldButton> createState() => _HoldButtonState();
+}
+
+class _HoldButtonState extends State<_HoldButton> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down == v) return;
+    setState(() => _down = v);
+    widget.onHold(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Semantics(
+      button: true,
+      label: 'Tieni premuto per vedere la foto originale',
+      onTap: () {
+        // con il lettore di schermo: alterna originale e ritocco
+        _set(!_down);
+      },
+      child: ExcludeSemantics(
+        child: Listener(
+          onPointerDown: (_) => _set(true),
+          onPointerUp: (_) => _set(false),
+          onPointerCancel: (_) => _set(false),
+          child: AnimatedContainer(
+            duration: Motion.fast,
+            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+            padding: const EdgeInsets.symmetric(horizontal: Space.m),
+            decoration: BoxDecoration(
+              color: _down
+                  ? Colors.white.withValues(alpha: 0.92)
+                  : Colors.black.withValues(alpha: 0.62),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.compare, size: 20, color: _down ? Colors.black : Colors.white),
+              const SizedBox(width: Space.s),
+              Text(widget.label,
+                  style: t.labelLarge?.copyWith(
+                      color: _down ? Colors.black : Colors.white)),
+            ]),
+          ),
         ),
-        child: Text(text, style: const TextStyle(color: Colors.white)),
-      );
+      ),
+    );
+  }
 }
 
 class _OverlayPainter extends CustomPainter {

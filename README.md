@@ -3,6 +3,17 @@
 App Android che migliora le foto degli orologi da mettere in vendita.
 Tutto avviene **sul telefono**: nessun caricamento, nessuna chiave, funziona anche offline.
 
+## Novità v0.7 (grafica)
+- **Editor su fondo grigio scuro neutro**, come gli editor foto professionali: i colori
+  della foto si giudicano senza dominanti.
+- **Barra strumenti in basso** con icone ed etichette (Auto, Luce, Quadrante, Sfondo).
+- **Pulsante "Prima"** sulla foto: tienilo premuto per vedere l'originale.
+- **Cursori più leggibili**: nome e valore sopra, cursore a tutta larghezza; doppio tocco
+  sul nome per azzerarlo. Controlli raggruppati in sezioni.
+- Font del marchio **Sora** per i titoli; pannello che si adatta allo schermo e al testo grande;
+  etichette per il lettore di schermo.
+- Serie di foto: griglia adattiva, foto senza quadrante segnate con "Quadrante?" (non solo col colore).
+
 ## Novità v0.6
 - **Scritte e indici più netti**: il ritocco del quadrante ora rinforza i dettagli fini
   (numeri, tacche, indici) invece di ammorbidirli. Prima "Togli polvere" scambiava

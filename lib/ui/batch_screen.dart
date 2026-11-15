@@ -11,6 +11,7 @@ import '../core/codec.dart';
 import '../core/params.dart';
 import '../services/cutout.dart';
 import 'editor_screen.dart';
+import 'theme.dart';
 
 class _Item {
   final XFile file;
@@ -220,110 +221,171 @@ class _BatchScreenState extends State<BatchScreen> {
   Widget build(BuildContext context) {
     final exporting = _exportMsg != null;
     final found = _items.where((e) => e.dialFound).length;
-    return PopScope(
-      canPop: !exporting,
-      child: Scaffold(
-        appBar: AppBar(title: Text('${_items.length} foto')),
-        body: SafeArea(
-          child: Column(children: [
-            if (!_ready) ...[
-              LinearProgressIndicator(value: _prepared / _items.length),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Miglioro le foto: $_prepared di ${_items.length}'),
-              ),
-            ] else
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                child: Text(
-                  '${found == _items.length ? 'Quadrante trovato in tutte le foto. Tocca una foto per ritoccarla.' : 'Quadrante trovato in $found foto su ${_items.length}: tocca quelle con il segnale arancio per posizionarlo tu.'}'
-                  '${_cutoutOk == _items.length ? '' : '\nScontorno IA riuscito in $_cutoutOk su ${_items.length}${Cutout.lastError != null ? ' (${Cutout.lastError})' : ''}.'}',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.all(8),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                ),
-                itemCount: _items.length,
-                itemBuilder: (_, i) => _tile(_items[i]),
-              ),
-            ),
-            if (exporting) ...[
-              LinearProgressIndicator(value: _exportProgress),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(_exportMsg!),
-              ),
-            ],
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: Row(children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _ready && !exporting ? _shareAll : null,
-                    icon: const Icon(Icons.share_outlined),
-                    label: const Text('Condividi'),
+    return Theme(
+      data: buildEditorTheme(),
+      child: Builder(builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        final t = Theme.of(ctx).textTheme;
+        final missing = _items.length - found;
+        String status;
+        if (!_ready) {
+          status = 'Miglioro le foto: $_prepared di ${_items.length}';
+        } else if (missing == 0) {
+          status = 'Quadrante trovato in tutte le foto. Tocca una foto per ritoccarla.';
+        } else {
+          status = 'Quadrante non trovato in $missing foto (segnate con "Quadrante?"): '
+              'toccale per posizionarlo tu.';
+        }
+        final cutoutNote = _ready && _cutoutOk < _items.length
+            ? 'Scontorno IA riuscito in $_cutoutOk su ${_items.length}'
+                '${Cutout.lastError != null ? ': ${Cutout.lastError}' : ''}.'
+            : null;
+        return PopScope(
+          canPop: !exporting,
+          child: Scaffold(
+            appBar: AppBar(title: Text('${_items.length} foto')),
+            body: SafeArea(
+              child: Column(children: [
+                if (!_ready)
+                  LinearProgressIndicator(
+                      value: _prepared / _items.length, minHeight: 2),
+                Semantics(
+                  liveRegion: true,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        Space.l, Space.m, Space.l, Space.xs),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(
+                        !_ready
+                            ? Icons.hourglass_top
+                            : missing == 0
+                                ? Icons.check_circle_outline
+                                : Icons.info_outline,
+                        size: 20,
+                        color: missing == 0 || !_ready ? cs.primary : cs.secondary,
+                      ),
+                      const SizedBox(width: Space.s),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(status, style: t.bodyMedium),
+                          if (cutoutNote != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: Space.xs),
+                              child: Text(cutoutNote,
+                                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                            ),
+                        ]),
+                      ),
+                    ]),
                   ),
                 ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _ready && !exporting ? _saveAll : null,
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Salva tutte'),
+                  child: GridView.builder(
+                    padding: const EdgeInsets.all(Space.s),
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 220,
+                      mainAxisSpacing: Space.s,
+                      crossAxisSpacing: Space.s,
+                    ),
+                    itemCount: _items.length,
+                    itemBuilder: (_, i) => _tile(ctx, _items[i], i),
                   ),
+                ),
+                if (exporting) ...[
+                  LinearProgressIndicator(value: _exportProgress, minHeight: 2),
+                  Semantics(
+                    liveRegion: true,
+                    child: Padding(
+                      padding: const EdgeInsets.all(Space.s),
+                      child: Text(_exportMsg!, style: t.bodySmall),
+                    ),
+                  ),
+                ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(Space.m, Space.xs, Space.m, Space.m),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48)),
+                        onPressed: _ready && !exporting ? _shareAll : null,
+                        icon: const Icon(Icons.share_outlined),
+                        label: const Text('Condividi'),
+                      ),
+                    ),
+                    const SizedBox(width: Space.m),
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48)),
+                        onPressed: _ready && !exporting ? _saveAll : null,
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Salva tutte'),
+                      ),
+                    ),
+                  ]),
                 ),
               ]),
             ),
-          ]),
-        ),
-      ),
+          ),
+        );
+      }),
     );
   }
 
-  Widget _tile(_Item it) {
-    final cs = Theme.of(context).colorScheme;
+  Widget _tile(BuildContext ctx, _Item it, int index) {
+    final cs = Theme.of(ctx).colorScheme;
+    final t = Theme.of(ctx).textTheme;
     Widget child;
     if (it.failed) {
-      child = const Center(child: Text('Foto non leggibile'));
+      child = Center(
+          child: Text('Foto non leggibile',
+              style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)));
     } else if (it.thumb == null) {
       child = const Center(child: CircularProgressIndicator(strokeWidth: 2));
     } else {
       child = Image.memory(it.thumb!, fit: BoxFit.cover, gaplessPlayback: true);
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Material(
-        color: cs.surfaceContainerHighest,
-        child: InkWell(
-          onTap: it.thumb == null ? null : () => _edit(it),
-          child: Stack(fit: StackFit.expand, children: [
-            child,
-            if (it.thumb != null && !it.dialFound)
-              const Positioned(
-                right: 6,
-                top: 6,
-                child: Tooltip(
-                  message: 'Quadrante non trovato',
-                  child: CircleAvatar(
-                    radius: 12,
-                    backgroundColor: Color(0xFFF28C38),
-                    child: Icon(Icons.priority_high, size: 16, color: Colors.white),
+    final needsDial = it.thumb != null && !it.dialFound;
+    return Semantics(
+      button: it.thumb != null,
+      label: 'Foto ${index + 1}${needsDial ? ', quadrante da posizionare' : ''}',
+      hint: it.thumb != null ? 'Tocca per ritoccarla' : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(fit: StackFit.expand, children: [
+          ColoredBox(color: cs.surfaceContainerHigh, child: child),
+          if (needsDial)
+            Positioned(
+              right: Space.s,
+              top: Space.s,
+              child: ExcludeSemantics(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: Space.s, vertical: Space.xs),
+                  decoration: BoxDecoration(
+                    color: cs.secondary,
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.watch_outlined, size: 14, color: Colors.black),
+                    const SizedBox(width: Space.xs),
+                    Text('Quadrante?',
+                        style: t.labelSmall?.copyWith(color: Colors.black)),
+                  ]),
                 ),
               ),
-            if (it.busy)
-              const ColoredBox(
-                color: Colors.black26,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-          ]),
-        ),
+            ),
+          if (it.busy)
+            const ColoredBox(
+              color: Colors.black38,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(onTap: it.thumb == null ? null : () => _edit(it)),
+          ),
+        ]),
       ),
     );
   }
