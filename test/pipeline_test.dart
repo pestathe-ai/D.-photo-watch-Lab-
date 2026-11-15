@@ -439,7 +439,7 @@ void main() {
     });
 
     test('scritte e lancette del quadrante restano', () {
-      expect(lumAt(out, 400, 243), lessThan(0.25)); // scritta
+      expect(lumAt(out, 385, 243), lessThan(0.25)); // scritta (fuori dalla lancetta)
       expect(lumAt(out, 400, 270) - lumAt(out, 380, 270), lessThan(-0.02)); // lancetta
       expect(lumAt(out, 360, 350), greaterThan(0.6)); // fondo del quadrante chiaro
     });
